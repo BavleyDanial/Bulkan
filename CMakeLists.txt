@@ -65,6 +65,10 @@ foreach(zlib_target zlib zlibstatic assimp)
     endif()
 endforeach()
 
+if(APPLE)
+    target_compile_options(assimp PRIVATE -Wno-error=nontrivial-memcall)
+endif()
+
 if (WIN32)
     get_target_property(ASSIMP_INCLUDE_DIRS assimp INTERFACE_INCLUDE_DIRECTORIES)
     set_target_properties(zlibstatic PROPERTIES

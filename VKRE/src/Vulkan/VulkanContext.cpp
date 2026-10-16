@@ -63,13 +63,19 @@ namespace VKRE {
             .bufferDeviceAddress = true,
         };
 
+        VkPhysicalDeviceVulkan13Features features13 = {
+            .shaderDemoteToHelperInvocation = true,
+            .synchronization2 = true,
+            .dynamicRendering = true,
+        };
+
         VulkanPhysicalDeviceSelector deviceSelector(sInstance, mSurface);
         deviceSelector = deviceSelector.SetName("Main Rendering Device")
                             .SetRequiredQueueFamilies({ QueueCapability::Graphics, QueueCapability::Present, QueueCapability::Compute })
                             .SetRequiredExtensions({ VK_KHR_SWAPCHAIN_EXTENSION_NAME })
                             .SetRequiredFeatures({ .shaderInt64 = true })
-                            .SetRequiredFeatures13({ .synchronization2 = true, .dynamicRendering = true })
-                            .SetRequiredFeatures12(features12);
+                            .SetRequiredFeatures12(features12)
+                            .SetRequiredFeatures13(features13);
 
 
 #ifdef PLATFORM_MACOS
