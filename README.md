@@ -44,7 +44,7 @@ Current Features:
 ### Installation
 
 ```
-git clone "https://github.com/BavleyDanial/VulkanRenderingEngine"
+git clone "https://github.com/BavleyDanial/Bulkan"
 cmake -B build
 ```
 
@@ -137,6 +137,7 @@ virtual void OnUIRender() {
 
 - [x] Add Textures
 - [x] Add Cubemaps/Skyboxes
+- [x] Rename Repo and namespaces to Bulkan or something related to that
 - [ ] Add Materials - In Progress
 - [ ] Add Blinn-Phong Specular Model - In Progress
 - [ ] Add PBR lighting - Soon
