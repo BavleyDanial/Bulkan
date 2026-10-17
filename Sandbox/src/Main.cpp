@@ -10,6 +10,8 @@ public:
             PushLayer(std::make_unique<ExampleLayer>());
         else
             PushLayer(std::make_unique<SandboxLayer>());
+
+        PushOverlay(std::make_unique<ProfilerOverlay>());
     }
 };
 

@@ -1,10 +1,11 @@
-#include "Renderer/RendererCommands.h"
+#include <Renderer/RendererCommands.h>
 #include <Renderer/SceneRenderer.h>
 #include <Renderer/Renderer.h>
 
 #include <Scene/Components.h>
 #include <ResourceManager/Resources.h>
 #include <AssetsManagers/AssetManager.h>
+#include <Core/Profiler.h>
 
 #include <glm/glm.hpp>
 #include <glm/trigonometric.hpp>
@@ -66,6 +67,8 @@ namespace VKRE {
     }
 
     void SceneRenderer::Render() {
+        VKRE_SCOPED_TIMER("SceneRenderer::Render");
+
         if (!mScene) {
             std::println("Couldn't find a scene to render");
             return;
@@ -104,6 +107,7 @@ namespace VKRE {
 
 
     void SceneRenderer::RenderScene() {
+        VKRE_SCOPED_TIMER("SceneRenderer::RenderScene");
         mScene->GetFlecsWorld().each([&](const TransformComponent& transform, const StaticMeshComponent& staticMesh) {
             if (!staticMesh.Asset)
                 return;
@@ -139,6 +143,7 @@ namespace VKRE {
     }
 
     void SceneRenderer::RenderSkybox() {
+        VKRE_SCOPED_TIMER("SceneRenderer::RenderSkybox");
         if (!mSkybox || mSkybox->BindlessIndex == -1)
             return;
 

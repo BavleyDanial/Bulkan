@@ -14,3 +14,6 @@
 
 #include <Renderer/Renderer.h>
 #include <Renderer/SceneRenderer.h>
+
+#include <Core/Profiler.h>
+#include <Core/ProfilerOverlay.h>

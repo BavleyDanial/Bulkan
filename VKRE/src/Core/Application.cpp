@@ -1,9 +1,10 @@
 #include <Core/Application.h>
+#include <Core/Profiler.h>
+
+#include <Renderer/Renderer.h>
 
 #include <chrono>
 #include <imgui.h>
-
-#include <Renderer/Renderer.h>
 
 namespace VKRE {
 
@@ -36,6 +37,8 @@ namespace VKRE {
 
         // TODO: Change this to close when the engine decides to close, not when ONE WINDOW decides it's done. This will help with multiple windows as well.
         while (!mWindow->ShouldClose()) {
+            Profiler::BeginFrame();
+
             auto now = std::chrono::high_resolution_clock::now();
             float dt = std::chrono::duration<float>(now - lastFrameTime).count();
             lastFrameTime = now;
@@ -43,15 +46,24 @@ namespace VKRE {
             mWindow->OnUpdate();
             mVulkanRenderer->BeginFrame();
 
-            for (auto& layer : mLayersStack)
-                layer->OnUpdate(dt);
+            {
+                VKRE_SCOPED_TIMER("Application::LayersStack::OnUpdate");
+                for (auto& layer : mLayersStack)
+                    layer->OnUpdate(dt);
+            }
+            {
+                VKRE_SCOPED_TIMER("Application::LayersStack::OnUIRender");
+                for (auto& layer : mLayersStack)
+                    layer->OnUIRender();
+            }
+            {
+                VKRE_SCOPED_TIMER("ImGui::Render");
+                mVulkanRenderer->OnImGui();
+                ImGui::Render();
+            }
 
-            for (auto& layer : mLayersStack)
-                layer->OnUIRender();
-
-            mVulkanRenderer->OnImGui();
-            ImGui::Render();
             mVulkanRenderer->Render();
+            Profiler::EndFrame();
         }
     }
 

@@ -2,6 +2,7 @@
 
 #include <Window/GlfwWindow.h>
 #include <Core/Application.h>
+#include <Core/Profiler.h>
 
 #include <cassert>
 
@@ -83,6 +84,7 @@ namespace VKRE {
     }
 
     void Window::OnUpdate() const {
+        VKRE_SCOPED_TIMER("Window::OnUpdate");
         glfwSwapBuffers(mGLFWwindow);
         Input::SetCurrentWindow(mGLFWwindow);
         Input::OnUpdate();

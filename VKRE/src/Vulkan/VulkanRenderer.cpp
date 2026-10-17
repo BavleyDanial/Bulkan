@@ -1,6 +1,8 @@
 #include <Vulkan/VulkanRenderer.h>
 
 #include <Core/Application.h>
+#include <Core/Profiler.h>
+
 #include <ImGui/Backend/ImGuiGLFW.h>
 #include <ImGui/Backend/ImGuiVulkan.h>
 
@@ -369,6 +371,7 @@ namespace VKRE {
     }
 
     void VulkanRenderer::BeginFrame() {
+        VKRE_SCOPED_TIMER("VulkanRenderer::BeginFrame");
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
@@ -379,6 +382,7 @@ namespace VKRE {
     }
 
     void VulkanRenderer::Render() {
+        VKRE_SCOPED_TIMER("VulkanRenderer::Render");
         VulkanFrameData& frame = mFrameManager->GetCurrentFrame();
 
         uint32_t swapchainImageIndex = 0;

@@ -32,3 +32,8 @@ target_link_libraries("VKRE" PUBLIC
 target_compile_definitions("VKRE" PUBLIC
     GLM_FORCE_DEPTH_ZERO_TO_ONE
 )
+
+option(VKRE_PROFILING_ENABLED "Enable CPU scoped timings" ON)
+if (VKRE_PROFILING_ENABLED)
+    target_compile_definitions("VKRE" PUBLIC VKRE_PROFILING_ENABLED)
+endif()
