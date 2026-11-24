@@ -10,7 +10,7 @@
 #include <Vulkan/VulkanComputePass.h>
 #include <Vulkan/VulkanImGuiPass.h>
 
-#include <Vulkan/VulkanResourceCache.h>
+#include <Vulkan/VulkanRHI.h>
 #include <Vulkan/VulkanDescriptors.h>
 #include <Vulkan/VulkanImage.h>
 
@@ -89,7 +89,7 @@ namespace VKRE {
 
         void ClearImage(VkCommandBuffer cmd);
 
-        VulkanResourceCache& GetResourceCache() { return *mResourceCache; }
+        VulkanRHI& GetResourceCache() { return *mResourceCache; }
 
     private:
         void CreateDrawImage();
@@ -105,7 +105,7 @@ namespace VKRE {
 
         std::unique_ptr<VulkanFrameManager> mFrameManager;
         std::unique_ptr<VulkanPresenter> mPresenter;
-        std::unique_ptr<VulkanResourceCache> mResourceCache;
+        std::unique_ptr<VulkanRHI> mResourceCache;
 
         std::unique_ptr<VulkanImageData> mDrawImage; // TODO: Once done with managing deletion/creation internally turn into a value rather than a pointer
         std::unique_ptr<VulkanImageData> mDepthImage;

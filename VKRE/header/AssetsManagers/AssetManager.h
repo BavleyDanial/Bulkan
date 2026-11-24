@@ -32,8 +32,8 @@ namespace VKRE {
     struct AssetManagerSettings {
         uint32_t MaxMeshes = 1024;
         uint32_t MaxShaders = 512;
-        uint32_t MaxTextures2D = 8192;
-        uint32_t MaxTexturesCube = 512;
+        uint32_t MaxTextures2D = 8191;
+        uint32_t MaxTexturesCube = 511;
     };
 
     template<typename T>

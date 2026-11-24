@@ -15,13 +15,13 @@ namespace VKRE {
     struct RHIRendererSettings {
         uint32_t MaxBuffers = 4096;
         uint32_t MaxTextures2D = 8192;
-        uint32_t MaxTextureCubes = 512;
+        uint32_t MaxTexturesCube = 512;
         // TODO: Uploads block today. Add a staging budget here when they get batched into the frame.
     };
 
-    using RHI_API = class VulkanResourceCache; // TODO: Change VulkanResourceCache name and don't do RHI_API in here, make it runtime changeable.
+    using RHI_API = class VulkanRHI; // TODO: Change VulkanResourceCache name and don't do RHI_API in here, make it runtime changeable.
 
-    // TODO: Maybe change the name to RHIDevice instead?
+    // NOTE: Maybe change the name to RHIDevice instead?
     class RHIRenderer {
     public:
         explicit RHIRenderer(RHI_API& api)

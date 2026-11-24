@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Vulkan/VulkanContext.h>
-#include <Vulkan/VulkanResourceCache.h>
+#include <Vulkan/VulkanRHI.h>
 
 #include <vector>
 
@@ -9,7 +9,7 @@ namespace VKRE {
 
     class VulkanUploader {
     public:
-        VulkanUploader(VulkanContext& context, VulkanResourceCache& cache);
+        VulkanUploader(VulkanContext& context, VulkanRHI& cache);
         ~VulkanUploader();
 
         void UploadBuffer(GPUBufferHandle handle, const void* data, uint64_t size, uint64_t offset);
@@ -21,7 +21,7 @@ namespace VKRE {
 
     private:
         VulkanContext& mContext;
-        VulkanResourceCache& mCache;
+        VulkanRHI& mCache;
 
         VkCommandPool mImmediatePool;
         VkCommandBuffer mImmediateBuffer;

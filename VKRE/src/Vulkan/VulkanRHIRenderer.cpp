@@ -1,5 +1,5 @@
 #include <Renderer/RHIRenderer.h>
-#include <Vulkan/VulkanResourceCache.h>
+#include <Vulkan/VulkanRHI.h>
 
 namespace VKRE {
 

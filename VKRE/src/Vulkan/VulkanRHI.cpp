@@ -1,4 +1,4 @@
-#include <Vulkan/VulkanResourceCache.h>
+#include <Vulkan/VulkanRHI.h>
 
 #include <Vulkan/VulkanUploader.h>
 #include <Vulkan/VulkanUtils.h>
@@ -68,7 +68,7 @@ namespace VKRE {
         return flags;
     }
 
-    VulkanResourceCache::VulkanResourceCache(VulkanContext& context, const RHIRendererSettings& settings, uint32_t framesInFlight)
+    VulkanRHI::VulkanRHI(VulkanContext& context, const RHIRendererSettings& settings, uint32_t framesInFlight)
         :mContext(context), mFramesInFlight(framesInFlight) {
         mBuffers.Slots.Init(settings.MaxBuffers);
         mImages2D.Slots.Init(settings.MaxTextures2D);
@@ -82,9 +82,9 @@ namespace VKRE {
     }
 
 
-    VulkanResourceCache::~VulkanResourceCache() = default;
+    VulkanRHI::~VulkanRHI() = default;
 
-    GPUBufferHandle VulkanResourceCache::CreateBuffer(const GPUBufferDesc& desc) {
+    GPUBufferHandle VulkanRHI::CreateBuffer(const GPUBufferDesc& desc) {
         if (desc.Size == 0) {
             std::println("VulkanResourceCache::CreateBuffer size is 0 ({})", desc.DebugName);
             return GPUBufferHandle::Null();
@@ -111,7 +111,7 @@ namespace VKRE {
         return handle;
     }
 
-    bool VulkanResourceCache::CreateImage(const TextureDesc& desc, bool isCube, VulkanImageData& outImage) {
+    bool VulkanRHI::CreateImage(const TextureDesc& desc, bool isCube, VulkanImageData& outImage) {
         VkFormat vkFormat = ToVkTextureFormat(desc.Format);
         if (vkFormat == VK_FORMAT_UNDEFINED) {
             std::println("VulkanResourceCache::CreateImage format is not supported ({})", desc.DebugName);
@@ -139,7 +139,7 @@ namespace VKRE {
         return true;
     }
 
-    Texture2DHandle VulkanResourceCache::CreateTexture2D(const TextureDesc& desc) {
+    Texture2DHandle VulkanRHI::CreateTexture2D(const TextureDesc& desc) {
         Texture2DHandle handle = mImages2D.Slots.Allocate();
         if (handle.IsNull()) {
             std::println("VulkanResourceCache::CreateTexture2D texture pool is full ({})", desc.DebugName);
@@ -153,7 +153,7 @@ namespace VKRE {
         return handle;
     }
 
-    TextureCubeHandle VulkanResourceCache::CreateTextureCube(const TextureDesc& desc) {
+    TextureCubeHandle VulkanRHI::CreateTextureCube(const TextureDesc& desc) {
         TextureCubeHandle handle = mImagesCube.Slots.Allocate();
         if (handle.IsNull()) {
             std::println("VulkanResourceCache::CreateTextureCube texture pool is full ({})", desc.DebugName);
@@ -168,28 +168,28 @@ namespace VKRE {
     }
 
     template<typename Tag, typename T>
-    void VulkanResourceCache::DestroyLater(VulkanStore<Tag, T>& store, ResourceHandle<Tag> handle) {
+    void VulkanRHI::DestroyLater(VulkanStore<Tag, T>& store, ResourceHandle<Tag> handle) {
         if (!store.Slots.Retire(handle))
             return; // null or already destroyed
         store.PendingDestroys.push_back({ mFrameNumber, handle.Index });
     }
 
-    void VulkanResourceCache::Destroy(GPUBufferHandle handle) {
+    void VulkanRHI::Destroy(GPUBufferHandle handle) {
         DestroyLater(mBuffers, handle);
     }
 
-    void VulkanResourceCache::Destroy(Texture2DHandle handle) {
+    void VulkanRHI::Destroy(Texture2DHandle handle) {
         if (handle == mFallbackTexture2D) return;
         DestroyLater(mImages2D, handle);
     }
 
-    void VulkanResourceCache::Destroy(TextureCubeHandle handle) {
+    void VulkanRHI::Destroy(TextureCubeHandle handle) {
         if (handle == mFallbackTextureCube) return;
         DestroyLater(mImagesCube, handle);
     }
 
     template<typename Tag, typename T, typename Fn>
-    void VulkanResourceCache::FreeFinished(VulkanStore<Tag, T>& store, Fn&& release) {
+    void VulkanRHI::FreeFinished(VulkanStore<Tag, T>& store, Fn&& release) {
         std::vector<PendingDestroy>& pending = store.PendingDestroys;
         size_t kept = 0;
         for (const PendingDestroy& entry : pending) {
@@ -203,7 +203,7 @@ namespace VKRE {
         pending.resize(kept);
     }
 
-    void VulkanResourceCache::FreeAllFinished() {
+    void VulkanRHI::FreeAllFinished() {
         FreeFinished(mBuffers, [&](uint32_t, VulkanGPUBufferData& buffer) {
             GPUBufferUtils::ReleaseBuffer(mContext, &buffer);
         });
@@ -221,12 +221,12 @@ namespace VKRE {
         });
     }
 
-    void VulkanResourceCache::BeginFrame(uint64_t frameNumber) {
+    void VulkanRHI::BeginFrame(uint64_t frameNumber) {
         mFrameNumber = frameNumber;
         FreeAllFinished();
     }
 
-    void VulkanResourceCache::DestroyAll() {
+    void VulkanRHI::DestroyAll() {
         mFrameNumber = std::numeric_limits<uint64_t>::max() - mFramesInFlight;
         FreeAllFinished();
 
@@ -272,7 +272,7 @@ namespace VKRE {
         vkDestroySampler(device, mDefaultSampler, nullptr);
     }
 
-    bool VulkanResourceCache::UploadBuffer(GPUBufferHandle handle, Bytes data, uint64_t offset) {
+    bool VulkanRHI::UploadBuffer(GPUBufferHandle handle, Bytes data, uint64_t offset) {
         VulkanGPUBufferData* buffer = mBuffers.Slots.Get(handle);
         if (!buffer) {
             std::println("VulkanResourceCache::UploadBuffer dead handle (index={})", handle.Index);
@@ -295,7 +295,7 @@ namespace VKRE {
         return true;
     }
 
-    bool VulkanResourceCache::UploadTexture2D(Texture2DHandle handle, Bytes data) {
+    bool VulkanRHI::UploadTexture2D(Texture2DHandle handle, Bytes data) {
         VulkanImageData* image = mImages2D.Slots.Get(handle);
         if (!image) {
             std::println("VulkanResourceCache::UploadTexture2D dead handle (index={})", handle.Index);
@@ -310,7 +310,7 @@ namespace VKRE {
         return true;
     }
 
-    bool VulkanResourceCache::UploadTextureCube(TextureCubeHandle handle, const CubeFaces& faces) {
+    bool VulkanRHI::UploadTextureCube(TextureCubeHandle handle, const CubeFaces& faces) {
         VulkanImageData* image = mImagesCube.Slots.Get(handle);
         if (!image) {
             std::println("VulkanResourceCache::UploadTextureCube dead handle (index={})", handle.Index);
@@ -325,20 +325,20 @@ namespace VKRE {
         return true;
     }
 
-    uint64_t VulkanResourceCache::GetBufferDeviceAddress(GPUBufferHandle handle) const {
+    uint64_t VulkanRHI::GetBufferDeviceAddress(GPUBufferHandle handle) const {
         const VulkanGPUBufferData* buffer = mBuffers.Slots.Get(handle);
         return buffer ? buffer->deviceAddress : 0;
     }
 
-    uint32_t VulkanResourceCache::GetBindlessIndex(Texture2DHandle handle) const {
+    uint32_t VulkanRHI::GetBindlessIndex(Texture2DHandle handle) const {
         return mImages2D.Slots.IsValid(handle) ? handle.Index : 0;
     }
 
-    uint32_t VulkanResourceCache::GetBindlessIndex(TextureCubeHandle handle) const {
+    uint32_t VulkanRHI::GetBindlessIndex(TextureCubeHandle handle) const {
         return mImagesCube.Slots.IsValid(handle) ? handle.Index : 0;
     }
 
-    VkShaderModule VulkanResourceCache::CreateShaderModule(const VulkanShaderStage& stage) {
+    VkShaderModule VulkanRHI::CreateShaderModule(const VulkanShaderStage& stage) {
         if (!stage.IsValid())
             return VK_NULL_HANDLE;
 
@@ -355,7 +355,7 @@ namespace VKRE {
         return shaderModule;
     }
 
-    VkPipelineLayout VulkanResourceCache::CreatePipelineLayout(const VulkanPipelineLayoutKey& key) {
+    VkPipelineLayout VulkanRHI::CreatePipelineLayout(const VulkanPipelineLayoutKey& key) {
         auto it = mPipelineLayouts.find(key);
         if (it != mPipelineLayouts.end())
             return it->second;
@@ -380,13 +380,13 @@ namespace VKRE {
         return layout;
     }
 
-    VkPipelineLayout VulkanResourceCache::GetPipelineLayout(const VulkanPipelineLayoutKey& key) const {
+    VkPipelineLayout VulkanRHI::GetPipelineLayout(const VulkanPipelineLayoutKey& key) const {
         auto it = mPipelineLayouts.find(key);
         if (it == mPipelineLayouts.end()) return VK_NULL_HANDLE;
         return it->second;
     }
 
-    VulkanGraphicsPipeline* VulkanResourceCache::CreateGraphicsPipeline(const VulkanGraphicsPipelineKey& key, const VulkanGraphicsShaders& shaders) {
+    VulkanGraphicsPipeline* VulkanRHI::CreateGraphicsPipeline(const VulkanGraphicsPipelineKey& key, const VulkanGraphicsShaders& shaders) {
         auto it = mGraphicsPipelines.find(key);
         if (it != mGraphicsPipelines.end())
             return &it->second;
@@ -443,13 +443,13 @@ namespace VKRE {
         return &inserted->second;
     }
 
-    VulkanGraphicsPipeline* VulkanResourceCache::GetGraphicsPipeline(const VulkanGraphicsPipelineKey& key) {
+    VulkanGraphicsPipeline* VulkanRHI::GetGraphicsPipeline(const VulkanGraphicsPipelineKey& key) {
         auto it = mGraphicsPipelines.find(key);
         if (it == mGraphicsPipelines.end()) return nullptr;
         return &it->second;
     }
 
-    VulkanComputePipeline* VulkanResourceCache::CreateComputePipeline(const VulkanComputePipelineKey& key, const VulkanShaderStage& shader) {
+    VulkanComputePipeline* VulkanRHI::CreateComputePipeline(const VulkanComputePipelineKey& key, const VulkanShaderStage& shader) {
         auto it = mComputePipelines.find(key);
         if (it != mComputePipelines.end())
             return &it->second;
@@ -478,13 +478,13 @@ namespace VKRE {
         return &inserted->second;
     }
 
-    VulkanComputePipeline* VulkanResourceCache::GetComputePipeline(const VulkanComputePipelineKey& key) {
+    VulkanComputePipeline* VulkanRHI::GetComputePipeline(const VulkanComputePipelineKey& key) {
         auto it = mComputePipelines.find(key);
         if (it == mComputePipelines.end()) return nullptr;
         return &it->second;
     }
 
-    void VulkanResourceCache::CreateDefaultSampler() {
+    void VulkanRHI::CreateDefaultSampler() {
         VkSamplerCreateInfo samplerInfo{};
         samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -500,7 +500,7 @@ namespace VKRE {
         VK_CHECK(vkCreateSampler(mContext.GetLogicalDevice().handle, &samplerInfo, nullptr, &mDefaultSampler));
     }
 
-    void VulkanResourceCache::CreateBindlessTables(const RHIRendererSettings& settings) {
+    void VulkanRHI::CreateBindlessTables(const RHIRendererSettings& settings) {
         VkDevice device = mContext.GetLogicalDevice().handle;
 
         VkDescriptorBindingFlags bindingFlags =
@@ -536,7 +536,7 @@ namespace VKRE {
         }
     }
 
-    void VulkanResourceCache::CreateFallbackTextures() {
+    void VulkanRHI::CreateFallbackTextures() {
         // 1x1 white 2D and 1x1 black cube. Being the first allocations, they land in slot 0.
         TextureDesc desc{};
         desc.Width = 1;
@@ -563,7 +563,7 @@ namespace VKRE {
         WriteBindlessAll(mBindlessTextureCubeSet, mImagesCube.Slots.GetCapacity(), mImagesCube.Slots.Get(mFallbackTextureCube)->imageView);
     }
 
-    void VulkanResourceCache::WriteBindless(VkDescriptorSet set, uint32_t index, VkImageView view) {
+    void VulkanRHI::WriteBindless(VkDescriptorSet set, uint32_t index, VkImageView view) {
         VkDescriptorImageInfo imageInfo{};
         imageInfo.sampler = mDefaultSampler;
         imageInfo.imageView = view;
@@ -581,7 +581,7 @@ namespace VKRE {
         vkUpdateDescriptorSets(mContext.GetLogicalDevice().handle, 1, &write, 0, nullptr);
     }
 
-    void VulkanResourceCache::WriteBindlessAll(VkDescriptorSet set, uint32_t count, VkImageView view) {
+    void VulkanRHI::WriteBindlessAll(VkDescriptorSet set, uint32_t count, VkImageView view) {
         VkDescriptorImageInfo imageInfo{};
         imageInfo.sampler = mDefaultSampler;
         imageInfo.imageView = view;

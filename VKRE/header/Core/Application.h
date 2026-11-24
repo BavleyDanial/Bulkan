@@ -28,13 +28,13 @@ namespace VKRE {
         static Application& GetInstance() { return *mInstance; }
         virtual void Run();
 
-        void PushLayer(std::unique_ptr<Layer> layer) { mLayersStack.PushLayer(std::move(layer)); }
-        void PushOverlay(std::unique_ptr<Layer> overlay) { mLayersStack.PushOverlay(std::move(overlay)); }
-        void PopLayer(std::unique_ptr<Layer> layer) { mLayersStack.PopLayer(layer.get()); }
-        void PopOverlay(std::unique_ptr<Layer> overlay) { mLayersStack.PopOverlay(overlay.get()); }
+        inline void PushLayer(std::unique_ptr<Layer> layer) { mLayersStack.PushLayer(std::move(layer)); }
+        inline void PushOverlay(std::unique_ptr<Layer> overlay) { mLayersStack.PushOverlay(std::move(overlay)); }
+        inline std::unique_ptr<Layer> PopLayer(Layer* layer) { return mLayersStack.PopLayer(layer); }
+        inline std::unique_ptr<Layer> PopOverlay(Layer* overlay) { return mLayersStack.PopOverlay(overlay); }
 
-        Window& GetWindow() { return *mWindow; }
-        EventDispatcher& GetEventDispatcher() { return mEventDispatcher; }
+        inline Window& GetWindow() { return *mWindow; }
+        inline EventDispatcher& GetEventDispatcher() { return mEventDispatcher; }
 
     private:
         static inline Application* mInstance = nullptr;

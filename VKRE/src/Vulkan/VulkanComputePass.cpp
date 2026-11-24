@@ -1,9 +1,8 @@
 #include <Vulkan/VulkanComputePass.h>
-#include <Vulkan/VulkanResourceCache.h>
 
 namespace VKRE {
 
-    VulkanComputePass::VulkanComputePass(VulkanResourceCache& cache, const VulkanComputePipelineKey& key, VkDescriptorSet descriptorSet, const glm::vec3& workgroup)
+    VulkanComputePass::VulkanComputePass(VulkanRHI& cache, const VulkanComputePipelineKey& key, VkDescriptorSet descriptorSet, const glm::vec3& workgroup)
         :mPipeline(cache.GetComputePipeline(key)), mDescriptorSet(descriptorSet), mWorkGroup(workgroup) {}
 
     void VulkanComputePass::Execute(VkCommandBuffer cmd, VkExtent2D extent) {

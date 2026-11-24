@@ -22,7 +22,7 @@ namespace VKRE {
 
         mFrameManager = std::make_unique<VulkanFrameManager>(mContext);
         mPresenter = std::make_unique<VulkanPresenter>(mContext);
-        mResourceCache = std::make_unique<VulkanResourceCache>(mContext, settings, mFrameManager->GetFramesInFlight());
+        mResourceCache = std::make_unique<VulkanRHI>(mContext, settings, mFrameManager->GetFramesInFlight());
 
         CreateDrawImage();
         CreateSceneUniformBuffers();
@@ -282,6 +282,7 @@ namespace VKRE {
             ReSize({ static_cast<uint32_t>(width), static_cast<uint32_t>(height) });
             return;
         }
+
         VK_CHECK(acquireResult);
         VK_CHECK(vkResetFences(mContext.GetLogicalDevice().handle, 1, &frame.WaitFence));
 

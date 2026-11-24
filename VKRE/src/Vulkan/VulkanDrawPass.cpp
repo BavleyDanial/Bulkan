@@ -3,7 +3,7 @@
 
 namespace VKRE {
 
-    VulkanDrawPass::VulkanDrawPass(VkDevice device, VulkanResourceCache& cache, const VulkanGraphicsPipelineKey& key,
+    VulkanDrawPass::VulkanDrawPass(VkDevice device, VulkanRHI& cache, const VulkanGraphicsPipelineKey& key,
                                     VkDescriptorSet descriptorSet, VkShaderStageFlags pushConstantsShaderStages)
         :mDevice(device), mCache(cache), mPipeline(cache.GetGraphicsPipeline(key)),
         mDescriptorSet(descriptorSet), mPushConstantsShaderStages(pushConstantsShaderStages) {}

@@ -17,6 +17,10 @@ namespace VKRE {
         RHIRendererSettings rhiSettings{};
         AssetManagerSettings assetSettings{};
 
+        assert(assetSettings.MaxMeshes * 2 <= rhiSettings.MaxBuffers && "AssetSettings.MaxMeshes must be less than RHISettings.MaxBuffers");
+        assert(assetSettings.MaxTextures2D < rhiSettings.MaxTextures2D && "AssetSettings.MaxTextures2D must be less than RHISettings.MaxTexures2D");
+        assert(assetSettings.MaxTexturesCube < rhiSettings.MaxTexturesCube && "AssetSettings.MaxTexturesCube must be less than RHISettings.MaxTexuresCube");
+
         mWindow = std::make_unique<Window>(WindowSpecs{ .resizable = true });
         mVulkanContext = std::make_unique<VulkanContext>(*mWindow);
         mVulkanRenderer = std::make_unique<VulkanRenderer>(*mVulkanContext, rhiSettings);

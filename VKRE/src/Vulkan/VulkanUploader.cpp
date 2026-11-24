@@ -9,7 +9,7 @@
 
 namespace VKRE {
 
-    VulkanUploader::VulkanUploader(VulkanContext& context, VulkanResourceCache& cache)
+    VulkanUploader::VulkanUploader(VulkanContext& context, VulkanRHI& cache)
         :mContext(context), mCache(cache) {
 
         VkCommandPoolCreateInfo poolInfo{};

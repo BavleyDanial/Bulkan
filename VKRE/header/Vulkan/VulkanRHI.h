@@ -18,13 +18,13 @@
 
 namespace VKRE {
 
-    class VulkanResourceCache {
+    class VulkanRHI {
     public:
-        VulkanResourceCache(VulkanContext& context, const RHIRendererSettings& settings, uint32_t framesInFlight);
-        ~VulkanResourceCache();
+        VulkanRHI(VulkanContext& context, const RHIRendererSettings& settings, uint32_t framesInFlight);
+        ~VulkanRHI();
 
-        VulkanResourceCache(const VulkanResourceCache&) = delete;
-        VulkanResourceCache& operator=(const VulkanResourceCache&) = delete;
+        VulkanRHI(const VulkanRHI&) = delete;
+        VulkanRHI& operator=(const VulkanRHI&) = delete;
 
         GPUBufferHandle CreateBuffer(const GPUBufferDesc& desc);
         Texture2DHandle CreateTexture2D(const TextureDesc& desc);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Vulkan/VulkanResourceCache.h>
+#include <Vulkan/VulkanRHI.h>
 #include <Vulkan/VulkanDescriptors.h>
 
 #include <Renderer/RendererCommands.h>
@@ -20,7 +20,7 @@ namespace VKRE {
 
     class VulkanDrawPass {
     public:
-        VulkanDrawPass(VkDevice device, VulkanResourceCache& cache, const VulkanGraphicsPipelineKey& key, VkDescriptorSet descriptorSet,
+        VulkanDrawPass(VkDevice device, VulkanRHI& cache, const VulkanGraphicsPipelineKey& key, VkDescriptorSet descriptorSet,
                         VkShaderStageFlags pushConstantsShaderStages);
 
         void SetActive(bool enabled) { mIsActive = enabled; }
@@ -40,7 +40,7 @@ namespace VKRE {
                     VkDescriptorSet sceneSet, VkDescriptorSet bindlessTexture2DSet, VkDescriptorSet bindlessTextureCubeSet);
     private:
         VkDevice mDevice;
-        VulkanResourceCache& mCache;
+        VulkanRHI& mCache;
 
         VulkanGraphicsPipeline* mPipeline;
         VkDescriptorSet mDescriptorSet;
