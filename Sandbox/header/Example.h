@@ -27,6 +27,10 @@ private:
     Entity mTeapot;
     Entity mSun;
 
+    // This layer owns one reference to each; released in OnDetach.
+    ResourceHandle<MeshAsset> mTeapotMesh;
+    ResourceHandle<TextureCubeAsset> mSkybox;
+
     float mSpeed = 40.0f;
     float mSensititvity = 60.0f;
     float mLastMouseX = 0;

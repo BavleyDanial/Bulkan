@@ -6,9 +6,8 @@
 #include <ImGui/Backend/ImGuiGLFW.h>
 #include <ImGui/Backend/ImGuiVulkan.h>
 
-#include <ResourceManager/ShaderCompiler.h>
-
 #include <cstddef>
+#include <cstring>
 #include <glm/glm.hpp>
 
 #include <cassert>
@@ -17,16 +16,14 @@
 
 namespace VKRE {
 
-    VulkanRenderer::VulkanRenderer(VulkanContext& context, ResourceManager& resourceManager)
-    :mContext(context), mResourceManager(resourceManager) {
+    VulkanRenderer::VulkanRenderer(VulkanContext& context, const RHIRendererSettings& settings)
+    :mContext(context) {
         Application::GetInstance().GetEventDispatcher().RegisterListener<WindowResizeEvent>(this, &VulkanRenderer::ReSize);
 
-        mResourceCache = std::make_unique<VulkanResourceCache>(mContext, mResourceManager);
-        mUploader = std::make_unique<VulkanUploader>(mContext, *mResourceCache);
         mFrameManager = std::make_unique<VulkanFrameManager>(mContext);
         mPresenter = std::make_unique<VulkanPresenter>(mContext);
+        mResourceCache = std::make_unique<VulkanResourceCache>(mContext, settings, mFrameManager->GetFramesInFlight());
 
-        CreateDefaultSampler();
         CreateDrawImage();
         CreateSceneUniformBuffers();
         InitDescriptors();
@@ -43,65 +40,18 @@ namespace VKRE {
         mPresenter.reset();
         mFrameManager.reset();
 
-        mUploader.reset();
         ImageUtils::ReleaseImage(mContext, mDrawImage.get());
         ImageUtils::ReleaseImage(mContext, mDepthImage.get());
         for (auto& buffer : mSceneUniformBuffers)
             GPUBufferUtils::ReleaseBuffer(mContext, &buffer);
+
         mResourceCache->DestroyAll();
+        mResourceCache.reset();
 
         mGlobalAllocator.DestroyPool(mContext.GetLogicalDevice().handle);
-        mBindlessTexture2DAllocator.DestroyPool(mContext.GetLogicalDevice().handle);
-        mBindlessTextureCubeAllocator.DestroyPool(mContext.GetLogicalDevice().handle);
 
         vkDestroyDescriptorSetLayout(mContext.GetLogicalDevice().handle, mDrawImageLayout, nullptr);
         vkDestroyDescriptorSetLayout(mContext.GetLogicalDevice().handle, mSceneLayout, nullptr);
-        vkDestroyDescriptorSetLayout(mContext.GetLogicalDevice().handle, mBindlessTexture2DLayout, nullptr);
-        vkDestroyDescriptorSetLayout(mContext.GetLogicalDevice().handle, mBindlessTextureCubeLayout, nullptr);
-
-        vkDestroySampler(mContext.GetLogicalDevice().handle, mDefaultSampler, nullptr);
-    }
-
-    void VulkanRenderer::UploadMesh(GPUBufferHandle VertexBuffer, GPUBufferHandle IndexBuffer, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices) {
-        mResourceCache->AllocateBuffer(VertexBuffer);
-        mResourceCache->AllocateBuffer(IndexBuffer);
-
-        mUploader->Begin();
-        mUploader->UploadBuffer(VertexBuffer, vertices.data(), vertices.size() * sizeof(Vertex), 0);
-        mUploader->UploadBuffer(IndexBuffer, indices.data(), indices.size() * sizeof(uint32_t), 0);
-        mUploader->End();
-    }
-
-    int32_t VulkanRenderer::UploadTexture2D(Texture2DHandle handle, const std::vector<std::byte>& pixels) {
-        mResourceCache->AllocateImage2D(handle);
-
-        mUploader->Begin();
-        mUploader->UploadTexture2D(handle, pixels.data(), pixels.size());
-        mUploader->End();
-
-        VulkanImageData* textureData = mResourceCache->GetImageData2D(handle);
-        return mBindlessTexture2DAllocator.RegisterImage(
-            mContext.GetLogicalDevice().handle,
-            mBindlessTexture2DSet,
-            textureData->imageView,
-            mDefaultSampler
-        );
-    }
-
-    int32_t VulkanRenderer::UploadTextureCube(TextureCubeHandle handle, const std::array<std::vector<std::byte>, 6>& faces) {
-        mResourceCache->AllocateImageCube(handle);
-
-        mUploader->Begin();
-        mUploader->UploadTextureCube(handle, faces);
-        mUploader->End();
-
-        VulkanImageData* textureData = mResourceCache->GetImageDataCube(handle);
-        return mBindlessTextureCubeAllocator.RegisterImage(
-            mContext.GetLogicalDevice().handle,
-            mBindlessTextureCubeSet,
-            textureData->imageView,
-            mDefaultSampler
-        );
     }
 
     void VulkanRenderer::UploadSceneData(const SceneUBO& sceneData) {
@@ -119,23 +69,9 @@ namespace VKRE {
         writer.UpdateSet(device, mCurrentSceneSet);
     }
 
-    uint64_t VulkanRenderer::GetBufferDeviceAddress(GPUBufferHandle buffer) {
-        return mResourceCache->GetBufferData(buffer)->deviceAddress;
-    }
-
     DrawPassHandle VulkanRenderer::AddDrawPass(const DrawPassDesc& desc) {
-        if (!desc.VertexShader.IsValid() || !desc.FragmentShader.IsValid()) {
-            std::println("VulkanRenderer::AddDrawPass Invalid shader handles");
-            return INVALID_DRAW_PASS;
-        }
-
-        if (!mResourceCache->CreateShader(desc.VertexShader)) {
-            std::println("VulkanRenderer::AddDrawPass Failed to upload {} vertex stage", static_cast<uint32_t>(desc.VertexShader.index));
-            return INVALID_DRAW_PASS;
-        }
-
-        if (!mResourceCache->CreateShader(desc.FragmentShader)) {
-            std::println("VulkanRenderer::AddDrawPass Failed to upload {} fragment stage", static_cast<uint32_t>(desc.FragmentShader.index));
+        if (!desc.Shader || desc.Shader->VertexSpirV.empty() || desc.Shader->FragmentSpirV.empty()) {
+            std::println("VulkanRenderer::AddDrawPass '{}' needs a shader with a vertex and a fragment stage", desc.debugName);
             return INVALID_DRAW_PASS;
         }
 
@@ -143,8 +79,8 @@ namespace VKRE {
             .descriptorSetLayouts = {
                 mDrawImageLayout,
                 mSceneLayout,
-                mBindlessTexture2DLayout,
-                mBindlessTextureCubeLayout,
+                mResourceCache->GetBindlessTexture2DLayout(),
+                mResourceCache->GetBindlessTextureCubeLayout(),
             },
             .pushConstantRanges = desc.pushConstantRanges
         };
@@ -155,9 +91,13 @@ namespace VKRE {
             return INVALID_DRAW_PASS;
         }
 
+        VulkanGraphicsShaders shaders{};
+        shaders.vertex = { desc.Shader->VertexSpirV, desc.Shader->EntryPoint.c_str() };
+        shaders.fragment = { desc.Shader->FragmentSpirV, desc.Shader->EntryPoint.c_str() };
+
         VulkanGraphicsPipelineKey pipelineKey {};
-        pipelineKey.vertexShader = desc.VertexShader;
-        pipelineKey.fragmentShader = desc.FragmentShader;
+        pipelineKey.vertexShader = HashShaderStage(shaders.vertex);
+        pipelineKey.fragmentShader = HashShaderStage(shaders.fragment);
         pipelineKey.layout = pipelineLayout;
         pipelineKey.colorAttachmentFromats = desc.colorAttachmentFormats;
         pipelineKey.depthAttachmentFormat = desc.depthAttachmentFormat;
@@ -167,7 +107,7 @@ namespace VKRE {
         pipelineKey.depthCompareOp = desc.depthCompareOp;
         pipelineKey.cullMode = desc.cullMode;
 
-        if (!mResourceCache->CreateGraphicsPipeline(pipelineKey)) {
+        if (!mResourceCache->CreateGraphicsPipeline(pipelineKey, shaders)) {
             std::println("VulkanRenderer::AddDrawPass Failed to create or retreive pipeline");
             return INVALID_DRAW_PASS;
         }
@@ -199,13 +139,8 @@ namespace VKRE {
     }
 
     ComputePassHandle VulkanRenderer::AddComputePass(const ComputePassDesc& desc) {
-        if (!desc.ComputeShader.IsValid()) {
-            std::println("VulkanRenderer::AddComputePass Invalid shader handle");
-            return INVALID_DRAW_PASS;
-        }
-
-        if (!mResourceCache->CreateShader(desc.ComputeShader)) {
-            std::println("VulkanRenderer::AddComputePass Failed to upload {}", static_cast<uint32_t>(desc.ComputeShader.index));
+        if (!desc.Shader || desc.Shader->ComputeSpirV.empty()) {
+            std::println("VulkanRenderer::AddComputePass '{}' needs a shader with a compute stage", desc.debugName);
             return INVALID_COMPUTE_PASS;
         }
 
@@ -220,8 +155,9 @@ namespace VKRE {
             return INVALID_COMPUTE_PASS;
         }
 
-        VulkanComputePipelineKey pipelineKey { desc.ComputeShader, pipelineLayout };
-        if (!mResourceCache->CreateComputePipeline(pipelineKey)) {
+        VulkanShaderStage shader = { desc.Shader->ComputeSpirV, desc.Shader->EntryPoint.c_str() };
+        VulkanComputePipelineKey pipelineKey { HashShaderStage(shader), pipelineLayout };
+        if (!mResourceCache->CreateComputePipeline(pipelineKey, shader)) {
             std::println("VulkanRenderer::AddComputePass Failed to create or retreive pipeline");
             return INVALID_COMPUTE_PASS;
         }
@@ -236,23 +172,6 @@ namespace VKRE {
             return;
         }
         mComputePasses[handle].SetPushConstantData(data, size);
-    }
-
-    void VulkanRenderer::CreateDefaultSampler() {
-        VkSamplerCreateInfo samplerInfo{};
-        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.magFilter = VK_FILTER_LINEAR;
-        samplerInfo.minFilter = VK_FILTER_LINEAR;
-        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.mipLodBias = 0.0f;
-        samplerInfo.anisotropyEnable = VK_FALSE;
-        samplerInfo.minLod = 0.0f;
-        samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
-        VK_CHECK(vkCreateSampler(mContext.GetLogicalDevice().handle, &samplerInfo, nullptr, &mDefaultSampler));
     }
 
     void VulkanRenderer::CreateDrawImage() {
@@ -312,37 +231,6 @@ namespace VKRE {
             mSceneLayout = layoutBuilder.Build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
         }
 
-        VkDescriptorBindingFlags bindingFlags =
-            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
-            VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
-
-        VkDescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo{};
-        bindingFlagsInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
-        bindingFlagsInfo.bindingCount = 1;
-        bindingFlagsInfo.pBindingFlags = &bindingFlags;
-
-        {   // Texture2D Descriptor Set 2
-            VulkanDescriptorLayoutBuilder layoutBuilder;
-            layoutBuilder.AddBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, 8192);
-            mBindlessTexture2DLayout = layoutBuilder.Build(device, VK_SHADER_STAGE_FRAGMENT_BIT,
-                    &bindingFlagsInfo,
-                    VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
-
-            mBindlessTexture2DAllocator.InitPool(device, 8192);
-            mBindlessTexture2DSet = mBindlessTexture2DAllocator.Allocate(device, mBindlessTexture2DLayout);
-        }
-
-        {   // TextureCube Descriptor Set 3
-            VulkanDescriptorLayoutBuilder layoutBuilder;
-            layoutBuilder.AddBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, 512);
-            mBindlessTextureCubeLayout = layoutBuilder.Build(device, VK_SHADER_STAGE_FRAGMENT_BIT,
-                    &bindingFlagsInfo,
-                    VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
-
-            mBindlessTextureCubeAllocator.InitPool(device, 512);
-            mBindlessTextureCubeSet = mBindlessTextureCubeAllocator.Allocate(device, mBindlessTextureCubeLayout);
-        }
-
         InitDrawImageDescriptor();
     }
 
@@ -379,6 +267,8 @@ namespace VKRE {
         VulkanFrameData& frame = mFrameManager->GetCurrentFrame();
         VK_CHECK(vkWaitForFences(mContext.GetLogicalDevice().handle, 1, &frame.WaitFence, true, UINT64_MAX));
         mFrameManager->ClearFramePools();
+
+        mResourceCache->BeginFrame(mFrameManager->GetTotalFramesCount());
     }
 
     void VulkanRenderer::Render() {
@@ -390,7 +280,6 @@ namespace VKRE {
         if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
             auto [width, height] = Application::GetInstance().GetWindow().GetFrameBufferExtents();
             ReSize({ static_cast<uint32_t>(width), static_cast<uint32_t>(height) });
-            VK_CHECK(vkResetFences(mContext.GetLogicalDevice().handle, 1, &frame.WaitFence));
             return;
         }
         VK_CHECK(acquireResult);
@@ -430,6 +319,9 @@ namespace VKRE {
 
         ImageUtils::TransitionImage(cmd, mDepthImage->image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
+        VkDescriptorSet bindlessTexture2DSet = mResourceCache->GetBindlessTexture2DSet();
+        VkDescriptorSet bindlessTextureCubeSet = mResourceCache->GetBindlessTextureCubeSet();
+
         for (auto& pass : mDrawPasses) {
             if (!pass.IsActive())
                 continue;
@@ -455,7 +347,7 @@ namespace VKRE {
             targetInfo.depthAttachment = &depthAttachment;
 
             pass.Execute(cmd, drawImageExtent, targetInfo,
-                        mCurrentSceneSet, mBindlessTexture2DSet, mBindlessTextureCubeSet);
+                        mCurrentSceneSet, bindlessTexture2DSet, bindlessTextureCubeSet);
         }
 
         ImageUtils::TransitionImage(cmd, mDrawImage->image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -465,7 +357,7 @@ namespace VKRE {
         ImageUtils::CopyImage(cmd, mDrawImage->image, swapChainImage, drawImageExtent, mPresenter->GetSwapChain().extent);
         ImageUtils::TransitionImage(cmd, swapChainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-        mImGuiPass->Execute(cmd, { swapchainImageIndex, nullptr} ); // Execute ImGuiPass
+        mImGuiPass->Execute(cmd, { swapchainImageIndex, nullptr} );
 
         ImageUtils::TransitionImage(cmd, swapChainImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 

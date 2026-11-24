@@ -44,6 +44,8 @@ namespace VKRE {
             VK_CHECK(vkCreateInstance(&createInfo, nullptr, &sInstance));
         }
 
+        // TODO: Move this to a function in Window that returns a surface for the backend API
+        // Example: window.GetVkSurface(sInstance, mSurface);, window.GetDxSurface(), etc.
         GLFWwindow* glfwWindow = window.GetGLFWwindow();
         if (glfwCreateWindowSurface(sInstance, glfwWindow, nullptr, &mSurface) != VK_SUCCESS) {
             std::println("Failed to create Vulkan Surface!");
@@ -58,6 +60,7 @@ namespace VKRE {
             .descriptorBindingUniformBufferUpdateAfterBind = true,
             .descriptorBindingSampledImageUpdateAfterBind = true,
             .descriptorBindingStorageBufferUpdateAfterBind = true,
+            .descriptorBindingUpdateUnusedWhilePending = true,
             .descriptorBindingPartiallyBound = true,
             .runtimeDescriptorArray = true,
             .bufferDeviceAddress = true,

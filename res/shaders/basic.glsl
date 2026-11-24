@@ -13,8 +13,8 @@ struct Vertex {
 layout(push_constant) uniform PushConstants {
     mat4 modelMatrix;
     uint64_t vertexBufferAddress;
-    int textureIndex;
-    int cubmapIndex;
+    uint textureIndex;   // bindless slot, 0 = white fallback
+    uint cubmapIndex;
 } pc;
 
 layout(set = 1, binding = 0) uniform SceneData {
@@ -61,9 +61,7 @@ void main() {
     vec3 sunColor = sceneData.sunColor.xyz;
     float sunIntensity = sceneData.sunColor.w;
 
-    vec4 albedo = vec4(1.0);
-    if (pc.textureIndex >= 0)
-        albedo = texture(textures[nonuniformEXT(pc.textureIndex)], inUV);
+    vec4 albedo = texture(textures[nonuniformEXT(pc.textureIndex)], inUV);
 
     if (albedo.a < 0.99)
         discard;

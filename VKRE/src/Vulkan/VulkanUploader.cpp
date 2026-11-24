@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstring>
 #include <array>
+#include <print>
 #include <vector>
 
 namespace VKRE {
@@ -45,7 +46,7 @@ namespace VKRE {
 
         VulkanGPUBufferData* dst = mCache.GetBufferData(handle);
         if (!dst) {
-            std::println("VulkanUploader::UploadBuffer buffer not found (index={})", static_cast<uint32_t>(handle.index));
+            std::println("VulkanUploader::UploadBuffer buffer not found (index={})", handle.Index);
             return;
         }
 
@@ -64,8 +65,8 @@ namespace VKRE {
         assert(mRecording && "VulkanUploader::UploadTexture called without without Begin");
 
         VulkanImageData* dst = mCache.GetImageData2D(handle);
-        if (!dst->imageView) {
-            std::println("VulkanUploader::UploadTexture texture not found (index={})", static_cast<uint32_t>(handle.index));
+        if (!dst) {
+            std::println("VulkanUploader::UploadTexture texture not found (index={})", handle.Index);
             return;
         }
         VkImage targetImage = dst->image;
@@ -122,10 +123,6 @@ namespace VKRE {
 
         VK_CHECK(vkWaitForFences(device, 1, &mImmediateFence, VK_TRUE, UINT64_MAX));
         VK_CHECK(vkResetFences(device, 1, &mImmediateFence));
-
-        for (auto& buffer : mPendingStagingBuffers)
-            GPUBufferUtils::ReleaseBuffer(mContext, &buffer);
-        mPendingStagingBuffers.clear();
         vkResetCommandBuffer(mImmediateBuffer, 0);
 
         VkCommandBufferBeginInfo cmdBufferBeginInfo{};
@@ -138,12 +135,20 @@ namespace VKRE {
         mRecording = true;
     }
 
-    void VulkanUploader::UploadTextureCube(TextureCubeHandle handle, const std::array<std::vector<std::byte>, 6>& faces) {
+    void VulkanUploader::UploadTextureCube(TextureCubeHandle handle, const CubeFaces& faces) {
         assert(mRecording && "VulkanUploader::UploadTextureCube called without Begin");
 
         VulkanImageData* dst = mCache.GetImageDataCube(handle);
-        if (!dst || !dst->imageView) {
+        if (!dst) {
+            std::println("VulkanUploader::UploadTextureCube texture not found (index={})", handle.Index);
             return;
+        }
+
+        for (const Bytes& face : faces) {
+            if (face.size() != faces[0].size()) {
+                std::println("VulkanUploader::UploadTextureCube faces have different sizes (index={})", handle.Index);
+                return;
+            }
         }
 
         uint64_t totalSize = 0;
@@ -209,6 +214,10 @@ namespace VKRE {
 
         VK_CHECK(vkQueueSubmit2(mContext.GetGraphicsQueue(), 1, &info, mImmediateFence));
         VK_CHECK(vkWaitForFences(mContext.GetLogicalDevice().handle, 1, &mImmediateFence, true, UINT64_MAX));
+
+        for (auto& buffer : mPendingStagingBuffers)
+            GPUBufferUtils::ReleaseBuffer(mContext, &buffer);
+        mPendingStagingBuffers.clear();
 
         mRecording = false;
     }

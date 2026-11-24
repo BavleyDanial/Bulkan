@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 
 #include <Assets/Mesh.h>
+#include <ResourceManager/ResourceHandles.h>
 
 namespace VKRE {
 
@@ -14,7 +15,7 @@ namespace VKRE {
     };
 
     struct StaticMeshComponent {
-        const MeshAsset* Asset;
+        ResourceHandle<MeshAsset> Mesh;
     };
 
     struct CameraComponent {

@@ -1,7 +1,9 @@
 #include <AssetsManagers/ShaderImporter.h>
 #include <ResourceManager/ShaderCompiler.h>
 
+#include <format>
 #include <fstream>
+#include <print>
 #include <sstream>
 
 #include <optional>
@@ -9,7 +11,6 @@
 namespace VKRE {
 
     std::optional<ShaderImportResults> ShaderImporter::LoadFromFile(
-        ResourceManager& manager,
         const std::filesystem::path& path,
         const ShaderImportOptions& options) {
 
@@ -24,40 +25,27 @@ namespace VKRE {
 
         ShaderImportResults results{};
         results.Name = path.filename().string();
-        bool hasFailed = false;
 
         ShaderCompileOptions compileOptions{};
         compileOptions.Optimise = options.Optimize;
         compileOptions.GenerateDebugInfo = options.GenerateDebugInfo;
         compileOptions.EntryPoint = options.EntryPoint;
 
-        for (const ParsedStage& parsed : stages) {
+        for (ParsedStage& parsed : stages) {
             std::string name = std::format("{}:{}", results.Name, static_cast<uint32_t>(parsed.stage));
 
             ShaderCompileResult compResult = ShaderCompiler::Compile(parsed.source, parsed.stage, name, compileOptions);
             if (!compResult.Succeeded()) {
                 std::println("ShaderImporter::LoadFromFile Failed to compile stage, Skipping stage '{}' in '{}'", static_cast<uint32_t>(parsed.stage), results.Name);
-                hasFailed = true;
                 continue;
             }
 
-            ShaderDesc desc{};
-            desc.Stage = parsed.stage;
-            desc.ByteCode = compResult.ByteCode;
-            desc.DebugName = name;
-            desc.Entrypoint = options.EntryPoint;
-            desc.Path = path.string();
-
-            ResourceRef<ShaderTag> shader = manager.CreateShader(desc);
-            if (!shader.IsValid()) continue;
-
             switch (parsed.stage) {
-                case ShaderStage::Vertex: results.VertexShader = shader; break;
-                case ShaderStage::Fragment: results.FragmentShader = shader; break;
-                case ShaderStage::Compute: results.ComputeShader = shader; break;
+                case ShaderStage::Vertex:   results.VertexSpirV = std::move(compResult.ByteCode); break;
+                case ShaderStage::Fragment: results.FragmentSpirV = std::move(compResult.ByteCode); break;
+                case ShaderStage::Compute:  results.ComputeSpirV = std::move(compResult.ByteCode); break;
                 default: break;
             }
-
         }
 
         if (!results.IsValid()) {
@@ -147,6 +135,10 @@ namespace VKRE {
     }
 
     ShaderStage ShaderImporter::ParseStageToken(std::string_view token) {
+        // Trailing '\r' (CRLF files on Windows, or checked out with autocrlf) would make every token unknown.
+        while (!token.empty() && (token.back() == '\r' || token.back() == ' ' || token.back() == '\t'))
+            token.remove_suffix(1);
+
         if (token == "Vertex")                  return ShaderStage::Vertex;
         if (token == "Fragment")                return ShaderStage::Fragment;
         if (token == "Compute")                 return ShaderStage::Compute;

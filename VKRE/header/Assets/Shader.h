@@ -1,16 +1,19 @@
 #pragma once
 
-#include <ResourceManager/ResourceRefs.h>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace VKRE {
 
     struct ShaderAsset {
         std::string Name;
         std::string Path;
+        std::string EntryPoint = "main";
 
-        ResourceRef<ShaderTag> VertexShader;
-        ResourceRef<ShaderTag> FragmentShader;
-        ResourceRef<ShaderTag> ComputeShader;
+        std::vector<uint32_t> VertexSpirV;
+        std::vector<uint32_t> FragmentSpirV;
+        std::vector<uint32_t> ComputeSpirV;
     };
 
 }

@@ -51,13 +51,17 @@ namespace VKRE {
         VkBuffer lastIB = VK_NULL_HANDLE;
         VulkanDescriptorWriter writer;
         for (const auto& draw : mDrawCommands) {
+            const VulkanGPUBufferData* indexBuffer = mCache.GetBufferData(draw.IndexBuffer);
+            if (!indexBuffer)
+                continue;
+
             DrawPushConstants pushConstants{};
             pushConstants.VertexBufferAddress = draw.VertexBufferAddress;
             pushConstants.Transform = draw.Transform;
             pushConstants.Texture2DIndex = draw.TextureIndex;
             vkCmdPushConstants(cmd, mPipeline->layout, mPushConstantsShaderStages, 0, sizeof(DrawPushConstants), &pushConstants);
 
-            VkBuffer ib = mCache.GetBufferData(draw.IndexBuffer)->buffer;
+            VkBuffer ib = indexBuffer->buffer;
             if (ib != lastIB) {
                 vkCmdBindIndexBuffer(cmd, ib, 0, VK_INDEX_TYPE_UINT32);
                 lastIB = ib;

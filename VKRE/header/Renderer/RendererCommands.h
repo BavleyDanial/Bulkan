@@ -10,13 +10,13 @@ namespace VKRE {
     struct DrawPushConstants {
         glm::mat4 Transform = glm::mat4(1.0f);
         uint64_t VertexBufferAddress = 0;
-        int32_t Texture2DIndex = -1;
-        int32_t TextureCubeIndex = -1;
+        uint32_t Texture2DIndex = 0;
+        uint32_t TextureCubeIndex = 0;
     };
 
     struct SkyboxPushConstants {
         glm::mat4 ViewProjection = glm::mat4(1.0f);
-        int32_t TextureCubeIndex = -1;
+        uint32_t TextureCubeIndex = 0;
     };
 
     struct MeshDrawCommand {
@@ -27,7 +27,7 @@ namespace VKRE {
         uint64_t VertexBufferAddress;
         glm::mat4 Transform;
         glm::mat4 ViewProjection;
-        int32_t TextureIndex = -1;
+        uint32_t TextureIndex = 0;
     };
 
     struct SkyboxDrawCommand {

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <vector>
 #include <string>
 
 #include <glm/glm.hpp>
@@ -27,26 +26,6 @@ namespace VKRE {
         Compute,
     };
 
-    struct ShaderDesc {
-        std::vector<uint32_t> ByteCode;
-        std::string DebugName = "";
-        std::string Path = "";
-        std::string Entrypoint = "main";
-        ShaderStage Stage;
-    };
-
-    struct ShaderHotData {
-        ShaderStage Stage;
-    };
-
-    struct ShaderColdData {
-        char DebugName[64] = "";
-        char Path[256] = "";
-        char Entrypoint[32] = "main";
-        std::vector<uint32_t> ByteCode;
-        bool IsDirty = false;
-    };
-
     enum class GPUBufferUsage : uint16_t {
         None        = 0,
         Vertex      = 1 << 0,
@@ -63,17 +42,6 @@ namespace VKRE {
         uint64_t Size = 0;
         GPUBufferUsage Usage = GPUBufferUsage::None;
         bool HostVisible = false;
-    };
-
-    struct GPUBufferHotData {
-        uint64_t DeviceAddress = 0;
-        uint64_t Size = 0;
-        bool HostVisible = false;
-    };
-
-    struct GPUBufferColdData {
-        char DebugName[64] = "";
-        GPUBufferUsage Usage = GPUBufferUsage::None;
     };
 
     struct Vertex {
@@ -124,22 +92,11 @@ namespace VKRE {
 
     struct TextureDesc {
         std::string DebugName = "";
-        glm::vec3 Dimensions = { 0, 0, 0 };
+        uint32_t Width = 0;
+        uint32_t Height = 0;
         TextureUsage Usage = TextureUsage::None;
         TextureFormat Format = TextureFormat::None;
-        uint32_t MipLevels = 0;
-    };
-
-    struct TextureHotData {
-        uint32_t Width;
-        uint32_t Height;
-        uint32_t MipLevels;
-        TextureFormat Format;
-    };
-
-    struct TextureColdData {
-        char DebugName[64] = "";
-        TextureUsage Usage = TextureUsage::None;
+        uint32_t MipLevels = 1; // > 1: the upload generates the chain from mip 0
     };
 
 }

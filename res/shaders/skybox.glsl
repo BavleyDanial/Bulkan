@@ -4,7 +4,7 @@
 
 layout(push_constant) uniform PushConstants {
     mat4 viewProjMatrix;
-    int textureIndex;
+    uint textureIndex;   // bindless slot, 0 = black fallback
 } pc;
 
 layout(set = 3, binding = 0) uniform samplerCube cubeMaps[];

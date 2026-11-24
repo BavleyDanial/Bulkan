@@ -7,19 +7,22 @@ void ExampleLayer::OnAttach() {
     mSceneRenderer.SetScene(mScene.get());
     mSceneRenderer.SetCamera(mCamera);
 
-    const MeshAsset* teapotMesh = AssetManager::LoadMesh("res/models/teapot.obj");
+    mTeapotMesh = AssetManager::LoadMesh("res/models/teapot.obj");
     mTeapot = mScene->AddEntity("Teapot");
-    mTeapot.Add<StaticMeshComponent>({ teapotMesh });
+    mTeapot.Add<StaticMeshComponent>({ mTeapotMesh });
     mTeapot.Add<TransformComponent>({ .Position = glm::vec3(0.0f, 0.0f, 50.0f), .Rotation = glm::vec3(-90.0f, 0.0f, 0.0f) });
 
     mSun = mScene->AddEntity("Sun");
     mSun.Add<DirectionalLightComponent>({});
 
-    const TextureCubeAsset* skyboxTexture = AssetManager::LoadTextureCube("res/textures/Cubemap_Sky_23-512x512.png");
-    mSceneRenderer.SetSkybox(skyboxTexture);
+    mSkybox = AssetManager::LoadTextureCube("res/textures/Cubemap_Sky_23-512x512.png");
+    mSceneRenderer.SetSkybox(mSkybox);
 }
 
-void ExampleLayer::OnDetach() {}
+void ExampleLayer::OnDetach() {
+    AssetManager::Release(mTeapotMesh);
+    AssetManager::Release(mSkybox);
+}
 
 void ExampleLayer::OnUpdate(float dt) {
     mFPS = 1 / dt;

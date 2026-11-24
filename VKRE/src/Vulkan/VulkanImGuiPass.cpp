@@ -39,7 +39,14 @@ namespace VKRE {
 
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+            ImGuiStyle& style = ImGui::GetStyle();
+            style.WindowRounding = 0.0f;
+            style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+        }
 
         ImGui_ImplGlfw_InitForVulkan(Application::GetInstance().GetWindow().GetGLFWwindow(), true);
 
@@ -66,6 +73,8 @@ namespace VKRE {
 
     VulkanImGuiPass::~VulkanImGuiPass() {
         ImGui_ImplVulkan_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
         vkDestroyDescriptorPool(mContext.GetLogicalDevice().handle, mImGuiPool, nullptr);
     }
 

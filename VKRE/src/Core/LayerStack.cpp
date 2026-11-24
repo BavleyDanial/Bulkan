@@ -1,10 +1,18 @@
 #include <Core/LayerStack.h>
 
+#include <algorithm>
+
 namespace VKRE {
 
     LayersStack::~LayersStack() {
-        for (auto& layer : mLayers)
-            layer->OnDetach();
+        Clear();
+    }
+
+    void LayersStack::Clear() {
+        for (auto it = mLayers.rbegin(); it != mLayers.rend(); it++)
+            (*it)->OnDetach();
+        mLayers.clear();
+        mLayerInsertIndex = 0;
     }
 
     void LayersStack::PushLayer(std::unique_ptr<Layer> layer) {
@@ -17,20 +25,35 @@ namespace VKRE {
         overlay->OnAttach();
         mLayers.emplace_back(std::move(overlay));
     }
-    void LayersStack::PopLayer(std::unique_ptr<Layer> layer) {
-        auto it = std::find(mLayers.begin(), mLayers.begin() + mLayerInsertIndex, layer);
-        if (it == mLayers.begin() + mLayerInsertIndex) return;
 
-        layer->OnDetach();
+    std::unique_ptr<Layer> LayersStack::PopLayer(Layer* layer) {
+        auto end = mLayers.begin() + mLayerInsertIndex;
+        auto it = std::find_if(mLayers.begin(), end, [layer](const auto& l) {
+            return l.get() == layer;
+        });
+
+        if (it == end)
+            return nullptr;
+
+        (*it)->OnDetach();
+        auto popped = std::move(*it);
         mLayers.erase(it);
         mLayerInsertIndex--;
+        return popped;
     }
 
-    void LayersStack::PopOverlay(std::unique_ptr<Layer> overlay) {
-        auto it = std::find(mLayers.begin() + mLayerInsertIndex, mLayers.end(), overlay);
-        if (it == mLayers.end()) return;
+    std::unique_ptr<Layer> LayersStack::PopOverlay(Layer* overlay) {
+        auto begin = mLayers.begin() + mLayerInsertIndex;
+        auto it = std::find_if(begin, mLayers.end(), [overlay](const auto& l) {
+            return l.get() == overlay;
+        });
 
-        overlay->OnDetach();
+        if (it == mLayers.end())
+            return nullptr;
+
+        (*it)->OnDetach();
+        auto popped = std::move(*it);
         mLayers.erase(it);
+        return popped;
     }
 }

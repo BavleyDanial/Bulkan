@@ -1,6 +1,5 @@
 #include <ResourceManager/ShaderCompiler.h>
 
-#include <ResourceManager/ResourceRefs.h>
 #include <ResourceManager/Resources.h>
 
 #include <shaderc/shaderc.hpp>

@@ -1,17 +1,15 @@
 #include <Vulkan/VulkanResourceCache.h>
 
-#include <Vulkan/VulkanGPUBuffer.h>
-#include <Vulkan/VulkanPipeline.h>
+#include <Vulkan/VulkanUploader.h>
 #include <Vulkan/VulkanUtils.h>
 #include <Vulkan/VulkanPipelineBuilder.h>
 
-#include <ResourceManager/Resources.h>
-
-//NOTE: SUEPR EXTRA TEMPORARY
-#include <Renderer/Renderer.h>
+#include <array>
 #include <cassert>
+#include <cstring>
+#include <limits>
 #include <print>
-#include <vulkan/vulkan_core.h>
+#include <vector>
 
 namespace VKRE {
 
@@ -70,29 +68,38 @@ namespace VKRE {
         return flags;
     }
 
-    VulkanResourceCache::VulkanResourceCache(VulkanContext& context, ResourceManager& manager)
-        :mContext(context), mResourceManager(manager) {}
+    VulkanResourceCache::VulkanResourceCache(VulkanContext& context, const RHIRendererSettings& settings, uint32_t framesInFlight)
+        :mContext(context), mFramesInFlight(framesInFlight) {
+        mBuffers.Slots.Init(settings.MaxBuffers);
+        mImages2D.Slots.Init(settings.MaxTextures2D);
+        mImagesCube.Slots.Init(settings.MaxTextureCubes);
 
-    bool VulkanResourceCache::AllocateBuffer(GPUBufferHandle handle) {
-        if (!handle.IsValid()) {
-            std::println("VulkanResourceCache::UploadBuffer handle is invalid");
-            return false;
+        mUploader = std::make_unique<VulkanUploader>(mContext, *this);
+
+        CreateDefaultSampler();
+        CreateBindlessTables(settings);
+        CreateFallbackTextures(); // must be the first textures created so the fallbacks get slot 0
+    }
+
+
+    VulkanResourceCache::~VulkanResourceCache() = default;
+
+    GPUBufferHandle VulkanResourceCache::CreateBuffer(const GPUBufferDesc& desc) {
+        if (desc.Size == 0) {
+            std::println("VulkanResourceCache::CreateBuffer size is 0 ({})", desc.DebugName);
+            return GPUBufferHandle::Null();
         }
 
-        if (handle.index >= mBuffers.size())                        mBuffers.resize(handle.index + 1);
-        else if (mBuffers[handle.index].buffer != VK_NULL_HANDLE)   return true;
+        GPUBufferHandle handle = mBuffers.Slots.Allocate();
+        if (handle.IsNull()) {
+            std::println("VulkanResourceCache::CreateBuffer buffer pool is full ({})", desc.DebugName);
+            return GPUBufferHandle::Null();
+        }
 
-        GPUBufferHotData* hot = mResourceManager.GetGPUBufferHot(handle);
-        assert(hot && "VulkanResourceCache::UploadBuffer buffer handle is valid but GetGPUBufferHot returned nullptr");
-
-        const GPUBufferColdData* cold = mResourceManager.GetGPUBufferCold(handle);
-        assert(hot && "VulkanResourceCache::UploadBuffer buffer handle is valid but GetGPUBufferCold returned nullptr");
-
-        VkBufferUsageFlags vkUsage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-        vkUsage |= ToVkBufferUsage(cold->Usage);
+        VkBufferUsageFlags vkUsage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | ToVkBufferUsage(desc.Usage);
 
         VmaAllocationCreateInfo allocInfo{};
-        if (hot->HostVisible) {
+        if (desc.HostVisible) {
             allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
             allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
         } else {
@@ -100,227 +107,252 @@ namespace VKRE {
             vkUsage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
         }
 
-        mBuffers[handle.index] = GPUBufferUtils::CreateBuffer(mContext, hot->Size, vkUsage, allocInfo);
-        hot->DeviceAddress = mBuffers[handle.index].deviceAddress;
-        return true;
+        *mBuffers.Slots.Get(handle) = GPUBufferUtils::CreateBuffer(mContext, desc.Size, vkUsage, allocInfo);
+        return handle;
     }
 
-    VulkanGPUBufferData* VulkanResourceCache::GetBufferData(GPUBufferHandle handle) {
-        if (handle.index >= mBuffers.size())                   return nullptr;
-        if (mBuffers[handle.index].buffer == VK_NULL_HANDLE)   return nullptr;
-        return &mBuffers[handle.index];
-    }
-
-    const VulkanGPUBufferData* VulkanResourceCache::GetBufferData(GPUBufferHandle handle) const {
-        if (handle.index >= mBuffers.size())                   return nullptr;
-        if (mBuffers[handle.index].buffer == VK_NULL_HANDLE)   return nullptr;
-        return &mBuffers[handle.index];
-    }
-
-    bool VulkanResourceCache::IsBufferAllocated(GPUBufferHandle handle) const {
-        if (handle.index >= mBuffers.size()) return false;
-        return mBuffers[handle.index].buffer != VK_NULL_HANDLE;
-    }
-
-    void VulkanResourceCache::DestroyBuffer(GPUBufferHandle handle) {
-        if (handle.index >= mBuffers.size()) return;
-        GPUBufferUtils::ReleaseBuffer(mContext, &mBuffers[handle.index]);
-    }
-
-    void VulkanResourceCache::DestroyAllBuffers() {
-        for (auto& buffer : mBuffers)
-            GPUBufferUtils::ReleaseBuffer(mContext, &buffer);
-        mBuffers.clear();
-    }
-
-    bool VulkanResourceCache::AllocateImage2D(Texture2DHandle handle) {
-        if (!handle.IsValid()) {
-            std::println("VulkanResourceCache::AllocateImage2D handle is invalid");
-            return false;
-        }
-
-        if (handle.index >= mImages2D.size())                         mImages2D.resize(handle.index + 1);
-        else if (mImages2D[handle.index].image != VK_NULL_HANDLE)     return true;
-
-        TextureHotData* hot = mResourceManager.GetTexture2DHot(handle);
-        assert(hot && "VulkanResourceCache::AllocateImage2D handle is valid but GetTexture2DHot returned nullptr");
-
-        TextureColdData* cold = mResourceManager.GetTexture2DCold(handle);
-        assert(hot && "VulkanResourceCache::AllocateImage2D handle is valid but GetTexture2DCold returned nullptr");
-
-        VkFormat vkFormat = ToVkTextureFormat(hot->Format);
+    bool VulkanResourceCache::CreateImage(const TextureDesc& desc, bool isCube, VulkanImageData& outImage) {
+        VkFormat vkFormat = ToVkTextureFormat(desc.Format);
         if (vkFormat == VK_FORMAT_UNDEFINED) {
-            std::println("VulkanResourceCache::AllocateImage2D format is not supported");
+            std::println("VulkanResourceCache::CreateImage format is not supported ({})", desc.DebugName);
             return false;
         }
 
-        VkImageUsageFlags vkUsage = ToVkImageUsage(cold->Usage);
-        VkExtent3D extent = { hot->Width, hot->Height, 1 };
-        VkImageAspectFlags vkAspect = VkGetAspectFlags(hot->Format);
+        if (desc.Width == 0 || desc.Height == 0) {
+            std::println("VulkanResourceCache::CreateImage size is 0 ({})", desc.DebugName);
+            return false;
+        }
+
+        VkImageUsageFlags vkUsage = ToVkImageUsage(desc.Usage);
+        VkExtent3D extent = { desc.Width, desc.Height, 1 };
+        VkImageAspectFlags vkAspect = VkGetAspectFlags(desc.Format);
+        uint32_t mipLevels = desc.MipLevels > 0 ? desc.MipLevels : 1;
 
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
         allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-        mImages2D[handle.index] = ImageUtils::CreateImage(mContext, vkFormat, vkUsage, extent, vkAspect, hot->MipLevels, allocInfo);
+        if (isCube)
+            outImage = ImageUtils::CreateImageCube(mContext, vkFormat, vkUsage, extent, vkAspect, mipLevels, allocInfo);
+        else
+            outImage = ImageUtils::CreateImage(mContext, vkFormat, vkUsage, extent, vkAspect, mipLevels, allocInfo);
         return true;
     }
 
-    VulkanImageData* VulkanResourceCache::GetImageData2D(Texture2DHandle handle) {
-        if (handle.index >= mImages2D.size())                    return nullptr;
-        if (mImages2D[handle.index].image == VK_NULL_HANDLE)     return nullptr;
-        return &mImages2D[handle.index];
-    }
-
-    const VulkanImageData* VulkanResourceCache::GetImageData2D(Texture2DHandle handle) const {
-        if (handle.index >= mImages2D.size())                    return nullptr;
-        if (mImages2D[handle.index].image == VK_NULL_HANDLE)     return nullptr;
-        return &mImages2D[handle.index];
-    }
-
-    bool VulkanResourceCache::IsImage2DAllocated(Texture2DHandle handle) const {
-        if (handle.index >= mImages2D.size()) return false;
-        return mImages2D[handle.index].image != VK_NULL_HANDLE;
-    }
-
-    void VulkanResourceCache::DestroyImage2D(Texture2DHandle handle) {
-        if (handle.index >= mImages2D.size()) return;
-        ImageUtils::ReleaseImage(mContext, &mImages2D[handle.index]);
-    }
-
-    void VulkanResourceCache::DestroyAllImages2D() {
-        for (auto& image : mImages2D)
-            ImageUtils::ReleaseImage(mContext, &image);
-        mImages2D.clear();
-    }
-
-    bool VulkanResourceCache::AllocateImageCube(TextureCubeHandle handle) {
-        if (!handle.IsValid()) {
-            std::println("VulkanResourceCache::AllocateImageCube handle is invalid");
-            return false;
+    Texture2DHandle VulkanResourceCache::CreateTexture2D(const TextureDesc& desc) {
+        Texture2DHandle handle = mImages2D.Slots.Allocate();
+        if (handle.IsNull()) {
+            std::println("VulkanResourceCache::CreateTexture2D texture pool is full ({})", desc.DebugName);
+            return Texture2DHandle::Null();
         }
 
-        if (handle.index >= mImagesCube.size())                       mImagesCube.resize(handle.index + 1);
-        else if (mImagesCube[handle.index].image != VK_NULL_HANDLE)     return true;
+        if (!CreateImage(desc, false, *mImages2D.Slots.Get(handle))) {
+            mImages2D.Slots.Free(handle);
+            return Texture2DHandle::Null();
+        }
+        return handle;
+    }
 
-        TextureHotData* hot = mResourceManager.GetTextureCubeHot(handle);
-        assert(hot && "VulkanResourceCache::AllocateImageCube handle is valid but GetTextureCubeHot returned nullptr");
-
-        TextureColdData* cold = mResourceManager.GetTextureCubeCold(handle);
-        assert(hot && "VulkanResourceCache::AllocateImageCube handle is valid but GetTextureCubeCold returned nullptr");
-
-        VkFormat vkFormat = ToVkTextureFormat(hot->Format);
-        if (vkFormat == VK_FORMAT_UNDEFINED) {
-            std::println("VulkanResourceCache::AllocateImageCube format is not supported");
-            return false;
+    TextureCubeHandle VulkanResourceCache::CreateTextureCube(const TextureDesc& desc) {
+        TextureCubeHandle handle = mImagesCube.Slots.Allocate();
+        if (handle.IsNull()) {
+            std::println("VulkanResourceCache::CreateTextureCube texture pool is full ({})", desc.DebugName);
+            return TextureCubeHandle::Null();
         }
 
-        VkImageUsageFlags vkUsage = ToVkImageUsage(cold->Usage);
-        VkExtent3D extent = { hot->Width, hot->Height, 1 };
-        VkImageAspectFlags vkAspect = VkGetAspectFlags(hot->Format);
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-        allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
-        mImagesCube[handle.index] = ImageUtils::CreateImageCube(mContext, vkFormat, vkUsage, extent, vkAspect, hot->MipLevels, allocInfo);
-        return true;
-    }
-
-    VulkanImageData* VulkanResourceCache::GetImageDataCube(TextureCubeHandle handle) {
-        if (handle.index >= mImagesCube.size())                    return nullptr;
-        if (mImagesCube[handle.index].image == VK_NULL_HANDLE)     return nullptr;
-        return &mImagesCube[handle.index];
-    }
-
-    const VulkanImageData* VulkanResourceCache::GetImageDataCube(TextureCubeHandle handle) const {
-        if (handle.index >= mImagesCube.size())                    return nullptr;
-        if (mImagesCube[handle.index].image == VK_NULL_HANDLE)     return nullptr;
-        return &mImagesCube[handle.index];
-    }
-
-    bool VulkanResourceCache::IsImageCubeAllocated(TextureCubeHandle handle) const {
-        if (handle.index >= mImagesCube.size()) return false;
-        return mImagesCube[handle.index].image != VK_NULL_HANDLE;
-    }
-
-    void VulkanResourceCache::DestroyImageCube(TextureCubeHandle handle) {
-        if (handle.index >= mImagesCube.size()) return;
-        ImageUtils::ReleaseImage(mContext, &mImagesCube[handle.index]);
-    }
-
-    void VulkanResourceCache::DestroyAllImageCubes() {
-        for (auto& image : mImagesCube)
-            ImageUtils::ReleaseImage(mContext, &image);
-        mImagesCube.clear();
-    }
-
-    bool VulkanResourceCache::CreateShader(ShaderHandle handle) {
-        if (!handle.IsValid()) {
-            std::println("VulkanResourceCache::CreateShader handle is invalid");
-            return false;
+        if (!CreateImage(desc, true, *mImagesCube.Slots.Get(handle))) {
+            mImagesCube.Slots.Free(handle);
+            return TextureCubeHandle::Null();
         }
+        return handle;
+    }
 
-        auto it = mShaderModules.find(handle);
-        bool alreadyUploaded = it != mShaderModules.end();
+    template<typename Tag, typename T>
+    void VulkanResourceCache::DestroyLater(VulkanStore<Tag, T>& store, ResourceHandle<Tag> handle) {
+        if (!store.Slots.Retire(handle))
+            return; // null or already destroyed
+        store.PendingDestroys.push_back({ mFrameNumber, handle.Index });
+    }
 
-        ShaderColdData* cold = mResourceManager.GetShaderCold(handle);
-        assert(cold && "VulkanResourceCache::CreateShader shader is valid but GetShaderCold returned nullptr");
+    void VulkanResourceCache::Destroy(GPUBufferHandle handle) {
+        DestroyLater(mBuffers, handle);
+    }
 
-        if (alreadyUploaded) {
-            if (!cold->IsDirty) {
-                return true;
+    void VulkanResourceCache::Destroy(Texture2DHandle handle) {
+        if (handle == mFallbackTexture2D) return;
+        DestroyLater(mImages2D, handle);
+    }
+
+    void VulkanResourceCache::Destroy(TextureCubeHandle handle) {
+        if (handle == mFallbackTextureCube) return;
+        DestroyLater(mImagesCube, handle);
+    }
+
+    template<typename Tag, typename T, typename Fn>
+    void VulkanResourceCache::FreeFinished(VulkanStore<Tag, T>& store, Fn&& release) {
+        std::vector<PendingDestroy>& pending = store.PendingDestroys;
+        size_t kept = 0;
+        for (const PendingDestroy& entry : pending) {
+            if (entry.Frame + mFramesInFlight <= mFrameNumber) {
+                release(entry.Index, store.Slots.At(entry.Index));
+                store.Slots.Recycle(entry.Index);
+            } else {
+                pending[kept++] = entry;
             }
+        }
+        pending.resize(kept);
+    }
 
-            vkDestroyShaderModule(mContext.GetLogicalDevice().handle, it->second, nullptr);
-            mShaderModules.erase(it);
+    void VulkanResourceCache::FreeAllFinished() {
+        FreeFinished(mBuffers, [&](uint32_t, VulkanGPUBufferData& buffer) {
+            GPUBufferUtils::ReleaseBuffer(mContext, &buffer);
+        });
+
+        VkImageView fallback2D = mImages2D.Slots.Get(mFallbackTexture2D)->imageView;
+        FreeFinished(mImages2D, [&](uint32_t index, VulkanImageData& image) {
+            WriteBindless(mBindlessTexture2DSet, index, fallback2D);
+            ImageUtils::ReleaseImage(mContext, &image);
+        });
+
+        VkImageView fallbackCube = mImagesCube.Slots.Get(mFallbackTextureCube)->imageView;
+        FreeFinished(mImagesCube, [&](uint32_t index, VulkanImageData& image) {
+            WriteBindless(mBindlessTextureCubeSet, index, fallbackCube);
+            ImageUtils::ReleaseImage(mContext, &image);
+        });
+    }
+
+    void VulkanResourceCache::BeginFrame(uint64_t frameNumber) {
+        mFrameNumber = frameNumber;
+        FreeAllFinished();
+    }
+
+    void VulkanResourceCache::DestroyAll() {
+        mFrameNumber = std::numeric_limits<uint64_t>::max() - mFramesInFlight;
+        FreeAllFinished();
+
+        uint32_t leakedBuffers = 0;
+        mBuffers.Slots.ForEach([&](GPUBufferHandle, VulkanGPUBufferData& buffer) {
+            GPUBufferUtils::ReleaseBuffer(mContext, &buffer);
+            leakedBuffers++;
+        });
+
+        uint32_t leakedTextures = 0;
+        mImages2D.Slots.ForEach([&](Texture2DHandle handle, VulkanImageData& image) {
+            ImageUtils::ReleaseImage(mContext, &image);
+            if (handle != mFallbackTexture2D) leakedTextures++;
+        });
+        mImagesCube.Slots.ForEach([&](TextureCubeHandle handle, VulkanImageData& image) {
+            ImageUtils::ReleaseImage(mContext, &image);
+            if (handle != mFallbackTextureCube) leakedTextures++;
+        });
+
+        if (leakedBuffers > 0 || leakedTextures > 0)
+            std::println("VulkanResourceCache::DestroyAll {} buffer(s) and {} texture(s) were never destroyed", leakedBuffers, leakedTextures);
+
+        mUploader.reset();
+
+        VkDevice device = mContext.GetLogicalDevice().handle;
+
+        for (auto& [key, pipeline] : mGraphicsPipelines)
+            pipeline.Destroy(device);
+        mGraphicsPipelines.clear();
+
+        for (auto& [key, pipeline] : mComputePipelines)
+            pipeline.Destroy(device);
+        mComputePipelines.clear();
+
+        for (auto& [key, layout] : mPipelineLayouts)
+            vkDestroyPipelineLayout(device, layout, nullptr);
+        mPipelineLayouts.clear();
+
+        mBindlessTexture2DAllocator.DestroyPool(device);
+        mBindlessTextureCubeAllocator.DestroyPool(device);
+        vkDestroyDescriptorSetLayout(device, mBindlessTexture2DLayout, nullptr);
+        vkDestroyDescriptorSetLayout(device, mBindlessTextureCubeLayout, nullptr);
+        vkDestroySampler(device, mDefaultSampler, nullptr);
+    }
+
+    bool VulkanResourceCache::UploadBuffer(GPUBufferHandle handle, Bytes data, uint64_t offset) {
+        VulkanGPUBufferData* buffer = mBuffers.Slots.Get(handle);
+        if (!buffer) {
+            std::println("VulkanResourceCache::UploadBuffer dead handle (index={})", handle.Index);
+            return false;
         }
 
-        return CreateShaderModule(handle, cold);
-    }
-
-    VkShaderModule VulkanResourceCache::GetShaderModule(ShaderHandle handle) const {
-        auto it = mShaderModules.find(handle);
-        if (it == mShaderModules.end()) return nullptr;
-        return it->second;
-    }
-
-    VkShaderModule VulkanResourceCache::GetShaderModule(ShaderHandle handle) {
-        auto it = mShaderModules.find(handle);
-        if (it == mShaderModules.end()) return nullptr;
-        return it->second;
-    }
-
-    bool VulkanResourceCache::IsShaderUploaded(ShaderHandle handle) const {
-        return mShaderModules.contains(handle);
-    }
-
-    void VulkanResourceCache::SyncDirtyShaders() {
-        std::vector<ShaderHandle> dirty;
-        for (auto& [handle, module] : mShaderModules) {
-            const ShaderColdData* cold = mResourceManager.GetShaderCold(handle);
-            if (cold && cold->IsDirty)
-                dirty.push_back(handle);
+        if (offset + data.size() > buffer->info.size) {
+            std::println("VulkanResourceCache::UploadBuffer {} bytes at offset {} don't fit in {} bytes", data.size(), offset, buffer->info.size);
+            return false;
         }
 
-        for (auto handle : dirty)
-            CreateShader(handle);
+        if (buffer->info.pMappedData) {
+            memcpy(static_cast<std::byte*>(buffer->info.pMappedData) + offset, data.data(), data.size());
+            return true;
+        }
+
+        mUploader->Begin();
+        mUploader->UploadBuffer(handle, data.data(), data.size(), offset);
+        mUploader->End();
+        return true;
     }
 
-    void VulkanResourceCache::DestroyShaderIfUnused(ShaderHandle handle) {
-        if (mResourceManager.IsShaderValid(handle)) return;
+    bool VulkanResourceCache::UploadTexture2D(Texture2DHandle handle, Bytes data) {
+        VulkanImageData* image = mImages2D.Slots.Get(handle);
+        if (!image) {
+            std::println("VulkanResourceCache::UploadTexture2D dead handle (index={})", handle.Index);
+            return false;
+        }
 
-        auto it = mShaderModules.find(handle);
-        if (it == mShaderModules.end()) return;
+        mUploader->Begin();
+        mUploader->UploadTexture2D(handle, data.data(), data.size());
+        mUploader->End();
 
-        vkDestroyShaderModule(mContext.GetLogicalDevice().handle, it->second, nullptr);
-        mShaderModules.erase(it);
+        WriteBindless(mBindlessTexture2DSet, handle.Index, image->imageView);
+        return true;
     }
 
-    void VulkanResourceCache::DestroyAllShaders() {
-        for (auto& [handle, module] : mShaderModules)
-            vkDestroyShaderModule(mContext.GetLogicalDevice().handle, module, nullptr);
-        mShaderModules.clear();
+    bool VulkanResourceCache::UploadTextureCube(TextureCubeHandle handle, const CubeFaces& faces) {
+        VulkanImageData* image = mImagesCube.Slots.Get(handle);
+        if (!image) {
+            std::println("VulkanResourceCache::UploadTextureCube dead handle (index={})", handle.Index);
+            return false;
+        }
+
+        mUploader->Begin();
+        mUploader->UploadTextureCube(handle, faces);
+        mUploader->End();
+
+        WriteBindless(mBindlessTextureCubeSet, handle.Index, image->imageView);
+        return true;
+    }
+
+    uint64_t VulkanResourceCache::GetBufferDeviceAddress(GPUBufferHandle handle) const {
+        const VulkanGPUBufferData* buffer = mBuffers.Slots.Get(handle);
+        return buffer ? buffer->deviceAddress : 0;
+    }
+
+    uint32_t VulkanResourceCache::GetBindlessIndex(Texture2DHandle handle) const {
+        return mImages2D.Slots.IsValid(handle) ? handle.Index : 0;
+    }
+
+    uint32_t VulkanResourceCache::GetBindlessIndex(TextureCubeHandle handle) const {
+        return mImagesCube.Slots.IsValid(handle) ? handle.Index : 0;
+    }
+
+    VkShaderModule VulkanResourceCache::CreateShaderModule(const VulkanShaderStage& stage) {
+        if (!stage.IsValid())
+            return VK_NULL_HANDLE;
+
+        VkShaderModuleCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        createInfo.codeSize = stage.spirV.size_bytes();
+        createInfo.pCode = stage.spirV.data();
+
+        VkShaderModule shaderModule = VK_NULL_HANDLE;
+        if (vkCreateShaderModule(mContext.GetLogicalDevice().handle, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+            std::println("VulkanResourceCache::CreateShaderModule failed ({} words)", stage.spirV.size());
+            return VK_NULL_HANDLE;
+        }
+        return shaderModule;
     }
 
     VkPipelineLayout VulkanResourceCache::CreatePipelineLayout(const VulkanPipelineLayoutKey& key) {
@@ -340,81 +372,44 @@ namespace VKRE {
 
         VkPipelineLayout layout = VK_NULL_HANDLE;
         if (vkCreatePipelineLayout(mContext.GetLogicalDevice().handle, &layoutInfo, nullptr, &layout) != VK_SUCCESS) {
-            std::println("VulkanComputePipelineBuilder::Build Failed to create Pipeline Layout");
-            return nullptr;
+            std::println("VulkanResourceCache::CreatePipelineLayout Failed to create Pipeline Layout");
+            return VK_NULL_HANDLE;
         }
 
-        mPipelineLayouts[key] = std::move(layout);
+        mPipelineLayouts[key] = layout;
         return layout;
-    }
-
-    VkPipelineLayout VulkanResourceCache::GetPipelineLayout(const VulkanPipelineLayoutKey& key) {
-        auto it = mPipelineLayouts.find(key);
-        if (it == mPipelineLayouts.end()) return nullptr;
-        return it->second;
     }
 
     VkPipelineLayout VulkanResourceCache::GetPipelineLayout(const VulkanPipelineLayoutKey& key) const {
         auto it = mPipelineLayouts.find(key);
-        if (it == mPipelineLayouts.end()) return nullptr;
+        if (it == mPipelineLayouts.end()) return VK_NULL_HANDLE;
         return it->second;
     }
 
-    bool VulkanResourceCache::IsPipelineLayoutCreated(const VulkanPipelineLayoutKey& key) const {
-        return mPipelineLayouts.contains(key);
-    }
-
-    void VulkanResourceCache::DestroyPipelineLayout(const VulkanPipelineLayoutKey& key) {
-        VkPipelineLayout layout = GetPipelineLayout(key);
-        if (layout) {
-            vkDestroyPipelineLayout(mContext.GetLogicalDevice().handle, layout, nullptr);
-            mPipelineLayouts.erase(key);
-        }
-    }
-
-    void VulkanResourceCache::DestroyAllPipelineLayouts() {
-        std::vector<VulkanPipelineLayoutKey> keys;
-        keys.reserve(mPipelineLayouts.size());
-        for (auto& [key, layout] : mPipelineLayouts)
-            keys.push_back(key);
-
-        for (auto& key : keys)
-            DestroyPipelineLayout(key);
-    }
-
-    VulkanGraphicsPipeline* VulkanResourceCache::CreateGraphicsPipeline(const VulkanGraphicsPipelineKey& key) {
+    VulkanGraphicsPipeline* VulkanResourceCache::CreateGraphicsPipeline(const VulkanGraphicsPipelineKey& key, const VulkanGraphicsShaders& shaders) {
         auto it = mGraphicsPipelines.find(key);
         if (it != mGraphicsPipelines.end())
             return &it->second;
 
+        assert(key.vertexShader == HashShaderStage(shaders.vertex) && key.fragmentShader == HashShaderStage(shaders.fragment)
+            && "VulkanResourceCache::CreateGraphicsPipeline key doesn't match the shaders");
+
+        VkDevice device = mContext.GetLogicalDevice().handle;
+
+        VkShaderModule vertexModule = CreateShaderModule(shaders.vertex);
+        VkShaderModule fragmentModule = CreateShaderModule(shaders.fragment);
+        if (!vertexModule || !fragmentModule) {
+            if (vertexModule) vkDestroyShaderModule(device, vertexModule, nullptr);
+            if (fragmentModule) vkDestroyShaderModule(device, fragmentModule, nullptr);
+            std::println("VulkanResourceCache::CreateGraphicsPipeline Failed to create a shader module");
+            return nullptr;
+        }
+
         VulkanGraphicsPipelineBuilder builder;
-        builder.SetPipelineLayout(key.layout);
-
-        if (key.vertexShader.IsValid()) {
-            VkShaderModule shaderModule = GetShaderModule(key.vertexShader);
-            if (!shaderModule) {
-                std::println("VulkanResourceCache::CreateGraphicsPipeline Failed to retreive or create a shader module from shader (index={})", static_cast<uint32_t>(key.vertexShader.index));
-                return nullptr;
-            }
-
-            const ShaderColdData* cold = mResourceManager.GetShaderCold(key.vertexShader);
-            builder.SetVertexShader(shaderModule, cold->Entrypoint);
-        }
-
-        if (key.fragmentShader.IsValid()) {
-            VkShaderModule shaderModule = GetShaderModule(key.fragmentShader);
-            if (!shaderModule) {
-                std::println("VulkanResourceCache::CreateGraphicsPipeline Failed to retreive or create a shader module from shader (index={})", static_cast<uint32_t>(key.fragmentShader.index));
-                return nullptr;
-            }
-
-            const ShaderColdData* cold = mResourceManager.GetShaderCold(key.fragmentShader);
-            builder.SetFragmentShader(shaderModule, cold->Entrypoint);
-        }
-
-        // TODO: Add other shaders
-
-        builder.SetTopology(key.topology)
+        builder.SetPipelineLayout(key.layout)
+                .SetVertexShader(vertexModule, shaders.vertex.entryPoint)
+                .SetFragmentShader(fragmentModule, shaders.fragment.entryPoint)
+                .SetTopology(key.topology)
                 .SetPrimitiveRestart(key.primitveRestartEnable)
                 .SetPolygonMode(key.polygonMode)
                 .SetCullMode(key.cullMode)
@@ -435,20 +430,17 @@ namespace VKRE {
                 .SetDepthAttachmentFormat(key.depthAttachmentFormat)
                 .SetStencilAttachmentFormat(key.stencilAttachmentFormat);
 
-        VulkanGraphicsPipeline pipeline = builder.Build(mContext.GetLogicalDevice().handle);
+        VulkanGraphicsPipeline pipeline = builder.Build(device);
+        vkDestroyShaderModule(device, vertexModule, nullptr);
+        vkDestroyShaderModule(device, fragmentModule, nullptr);
+
         if (!pipeline.Succeeded()) {
             std::println("VulkanResourceCache::CreateGraphicsPipeline Failed to create graphics pipeline");
             return nullptr;
         }
 
-        pipeline.vertexShader = ResourceRef<ShaderTag>(key.vertexShader, &mResourceManager);
-        pipeline.fragmentShader = ResourceRef<ShaderTag>(key.fragmentShader, &mResourceManager);
-        pipeline.geometryShader = ResourceRef<ShaderTag>(key.geometryShader, &mResourceManager);
-        pipeline.tessControlShader = ResourceRef<ShaderTag>(key.tessControlShader, &mResourceManager);
-        pipeline.tessEvalShader = ResourceRef<ShaderTag>(key.tessEvalShader, &mResourceManager);
-
-        mGraphicsPipelines[key] = std::move(pipeline);
-        return &mGraphicsPipelines[key];
+        auto [inserted, _] = mGraphicsPipelines.emplace(key, pipeline);
+        return &inserted->second;
     }
 
     VulkanGraphicsPipeline* VulkanResourceCache::GetGraphicsPipeline(const VulkanGraphicsPipelineKey& key) {
@@ -457,81 +449,33 @@ namespace VKRE {
         return &it->second;
     }
 
-    const VulkanGraphicsPipeline* VulkanResourceCache::GetGraphicsPipeline(const VulkanGraphicsPipelineKey& key) const {
-        auto it = mGraphicsPipelines.find(key);
-        if (it == mGraphicsPipelines.end()) return nullptr;
-        return &it->second;
-    }
-
-    bool VulkanResourceCache::IsGraphicsPipelineCreated(const VulkanGraphicsPipelineKey& key) const {
-        return mGraphicsPipelines.contains(key);
-    }
-
-    void VulkanResourceCache::DestroyGraphicsPipeline(const VulkanGraphicsPipelineKey& key) {
-        VulkanGraphicsPipeline* pipeline = GetGraphicsPipeline(key);
-
-        if (pipeline) {
-            ShaderHandle vertexHandle = pipeline->vertexShader.Get();
-            ShaderHandle fragmentHandle = pipeline->fragmentShader.Get();
-            ShaderHandle geometryHandle = pipeline->geometryShader.Get();
-            ShaderHandle tessControlHandle = pipeline->tessControlShader.Get();
-            ShaderHandle tessEvalHandle = pipeline->tessEvalShader.Get();
-
-            pipeline->Destroy(mContext.GetLogicalDevice().handle);
-            mGraphicsPipelines.erase(key);
-
-            DestroyShaderIfUnused(vertexHandle);
-            DestroyShaderIfUnused(fragmentHandle);
-            DestroyShaderIfUnused(geometryHandle);
-            DestroyShaderIfUnused(tessControlHandle);
-            DestroyShaderIfUnused(tessEvalHandle);
-        }
-    }
-
-    void VulkanResourceCache::DestroyAllGraphicsPipelines() {
-        std::vector<VulkanGraphicsPipelineKey> keys;
-        keys.reserve(mGraphicsPipelines.size());
-        for (auto& [key, pipeline] : mGraphicsPipelines)
-            keys.push_back(key);
-
-        for (auto& key : keys)
-            DestroyGraphicsPipeline(key);
-    }
-
-    VulkanComputePipeline* VulkanResourceCache::CreateComputePipeline(const VulkanComputePipelineKey& key) {
+    VulkanComputePipeline* VulkanResourceCache::CreateComputePipeline(const VulkanComputePipelineKey& key, const VulkanShaderStage& shader) {
         auto it = mComputePipelines.find(key);
         if (it != mComputePipelines.end())
             return &it->second;
 
-        VkShaderModule shaderModule = GetShaderModule(key.shader);
+        assert(key.shader == HashShaderStage(shader) && "VulkanResourceCache::CreateComputePipeline key doesn't match the shader");
+
+        VkDevice device = mContext.GetLogicalDevice().handle;
+        VkShaderModule shaderModule = CreateShaderModule(shader);
         if (!shaderModule) {
-            if (CreateShader(key.shader)) {
-                shaderModule = GetShaderModule(key.shader);
-            } else {
-                std::println("VulkanResourceCache::CreateComputePipeline Failed to retreive or create a shader module from shader (index={})", static_cast<uint32_t>(key.shader.index));
-                return nullptr;
-            }
+            std::println("VulkanResourceCache::CreateComputePipeline Failed to create a shader module");
+            return nullptr;
         }
 
         VulkanComputePipeline pipeline = VulkanComputePipelineBuilder()
-            .SetComputeShader(shaderModule)
+            .SetComputeShader(shaderModule, shader.entryPoint)
             .SetPipelineLayout(key.layout)
-            .Build(mContext.GetLogicalDevice().handle);
+            .Build(device);
+        vkDestroyShaderModule(device, shaderModule, nullptr);
 
         if (!pipeline.Succeeded()) {
             std::println("VulkanResourceCache::CreateComputePipeline Failed to create compute pipeline");
             return nullptr;
         }
 
-        pipeline.shader = ResourceRef<ShaderTag>(key.shader, &mResourceManager);
-        mComputePipelines[key] = std::move(pipeline);
-        return &mComputePipelines[key];
-    }
-
-    const VulkanComputePipeline* VulkanResourceCache::GetComputePipeline(const VulkanComputePipelineKey& key) const {
-        auto it = mComputePipelines.find(key);
-        if (it == mComputePipelines.end()) return nullptr;
-        return &it->second;
+        auto [inserted, _] = mComputePipelines.emplace(key, pipeline);
+        return &inserted->second;
     }
 
     VulkanComputePipeline* VulkanResourceCache::GetComputePipeline(const VulkanComputePipelineKey& key) {
@@ -540,63 +484,120 @@ namespace VKRE {
         return &it->second;
     }
 
-    bool VulkanResourceCache::IsComputePipelineCreated(const VulkanComputePipelineKey& key) const {
-        return mComputePipelines.contains(key);
+    void VulkanResourceCache::CreateDefaultSampler() {
+        VkSamplerCreateInfo samplerInfo{};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.magFilter = VK_FILTER_LINEAR;
+        samplerInfo.minFilter = VK_FILTER_LINEAR;
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.mipLodBias = 0.0f;
+        samplerInfo.anisotropyEnable = VK_FALSE;
+        samplerInfo.minLod = 0.0f;
+        samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+        VK_CHECK(vkCreateSampler(mContext.GetLogicalDevice().handle, &samplerInfo, nullptr, &mDefaultSampler));
     }
 
-    void VulkanResourceCache::DestroyComputePipeline(const VulkanComputePipelineKey& key) {
-        VulkanComputePipeline* pipeline = GetComputePipeline(key);
-        if (pipeline) {
-            ShaderHandle handle = pipeline->shader.Get();
-            pipeline->Destroy(mContext.GetLogicalDevice().handle);
-            mComputePipelines.erase(key);
-            DestroyShaderIfUnused(handle);
+    void VulkanResourceCache::CreateBindlessTables(const RHIRendererSettings& settings) {
+        VkDevice device = mContext.GetLogicalDevice().handle;
+
+        VkDescriptorBindingFlags bindingFlags =
+            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+            VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
+            VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
+
+        VkDescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo{};
+        bindingFlagsInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+        bindingFlagsInfo.bindingCount = 1;
+        bindingFlagsInfo.pBindingFlags = &bindingFlags;
+
+        {   // Texture2D Descriptor Set 2
+            VulkanDescriptorLayoutBuilder layoutBuilder;
+            layoutBuilder.AddBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, settings.MaxTextures2D);
+            mBindlessTexture2DLayout = layoutBuilder.Build(device, VK_SHADER_STAGE_FRAGMENT_BIT,
+                    &bindingFlagsInfo,
+                    VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
+
+            mBindlessTexture2DAllocator.InitPool(device, settings.MaxTextures2D);
+            mBindlessTexture2DSet = mBindlessTexture2DAllocator.Allocate(device, mBindlessTexture2DLayout);
+        }
+
+        {   // TextureCube Descriptor Set 3
+            VulkanDescriptorLayoutBuilder layoutBuilder;
+            layoutBuilder.AddBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, settings.MaxTextureCubes);
+            mBindlessTextureCubeLayout = layoutBuilder.Build(device, VK_SHADER_STAGE_FRAGMENT_BIT,
+                    &bindingFlagsInfo,
+                    VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
+
+            mBindlessTextureCubeAllocator.InitPool(device, settings.MaxTextureCubes);
+            mBindlessTextureCubeSet = mBindlessTextureCubeAllocator.Allocate(device, mBindlessTextureCubeLayout);
         }
     }
 
-    void VulkanResourceCache::DestroyAllComputePipelines() {
-        std::vector<VulkanComputePipelineKey> keys;
-        keys.reserve(mComputePipelines.size());
-        for (auto& [key, pipeline] : mComputePipelines)
-            keys.push_back(key);
+    void VulkanResourceCache::CreateFallbackTextures() {
+        // 1x1 white 2D and 1x1 black cube. Being the first allocations, they land in slot 0.
+        TextureDesc desc{};
+        desc.Width = 1;
+        desc.Height = 1;
+        desc.Format = TextureFormat::R8G8B8A8_UNORM;
+        desc.Usage = TextureUsage::Sampled | TextureUsage::TransferDst;
+        desc.MipLevels = 1;
 
-        for (auto& key : keys)
-            DestroyComputePipeline(key);
+        desc.DebugName = "Fallback2D";
+        mFallbackTexture2D = CreateTexture2D(desc);
+        assert(mFallbackTexture2D.Index == 0 && "VulkanResourceCache fallback 2D texture must be slot 0");
+
+        desc.DebugName = "FallbackCube";
+        mFallbackTextureCube = CreateTextureCube(desc);
+        assert(mFallbackTextureCube.Index == 0 && "VulkanResourceCache fallback cube texture must be slot 0");
+
+        const std::array<std::byte, 4> white = { std::byte{255}, std::byte{255}, std::byte{255}, std::byte{255} };
+        const std::array<std::byte, 4> black = { std::byte{0}, std::byte{0}, std::byte{0}, std::byte{255} };
+        UploadTexture2D(mFallbackTexture2D, white);
+        UploadTextureCube(mFallbackTextureCube, { black, black, black, black, black, black });
+
+        // Every slot starts on the fallback, so unused and dead indices are always safe to sample.
+        WriteBindlessAll(mBindlessTexture2DSet, mImages2D.Slots.GetCapacity(), mImages2D.Slots.Get(mFallbackTexture2D)->imageView);
+        WriteBindlessAll(mBindlessTextureCubeSet, mImagesCube.Slots.GetCapacity(), mImagesCube.Slots.Get(mFallbackTextureCube)->imageView);
     }
 
-    void VulkanResourceCache::DestroyAll() {
-        DestroyAllImages2D();
-        DestroyAllImageCubes();
-        DestroyAllBuffers();
-        DestroyAllGraphicsPipelines();
-        DestroyAllComputePipelines();
-        DestroyAllPipelineLayouts();
-        DestroyAllShaders();
+    void VulkanResourceCache::WriteBindless(VkDescriptorSet set, uint32_t index, VkImageView view) {
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.sampler = mDefaultSampler;
+        imageInfo.imageView = view;
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = set;
+        write.dstBinding = 0;
+        write.dstArrayElement = index;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.pImageInfo = &imageInfo;
+
+        vkUpdateDescriptorSets(mContext.GetLogicalDevice().handle, 1, &write, 0, nullptr);
     }
 
-    bool VulkanResourceCache::CreateShaderModule(ShaderHandle handle, ShaderColdData* cold) {
-        if (cold->ByteCode.empty()) {
-            std::println("VulkanResourceCache::CreateShaderModule Cannot create shader module, SPIRV is empty (index={})", static_cast<uint32_t>(handle.index));
-            return false;
-        }
+    void VulkanResourceCache::WriteBindlessAll(VkDescriptorSet set, uint32_t count, VkImageView view) {
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.sampler = mDefaultSampler;
+        imageInfo.imageView = view;
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        std::vector<VkDescriptorImageInfo> infos(count, imageInfo);
 
-        VkShaderModuleCreateInfo createInfo = {};
-        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        createInfo.pNext = nullptr;
-        createInfo.codeSize = cold->ByteCode.size() * sizeof(uint32_t);
-        createInfo.pCode = cold->ByteCode.data();
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = set;
+        write.dstBinding = 0;
+        write.dstArrayElement = 0;
+        write.descriptorCount = count;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.pImageInfo = infos.data();
 
-        VkShaderModule shaderModule;
-        if (vkCreateShaderModule(mContext.GetLogicalDevice().handle, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-            std::println("VulkanResourceCache::CreateShaderModule Shader module has failed (index={})", static_cast<uint32_t>(handle.index));
-            return false;
-        }
-
-        mShaderModules[handle] = shaderModule;
-        assert(cold && "VulkanResourceCache Shader is valid but GetShaderCold returned nullptr");
-        cold->IsDirty = false;
-
-        return true;
+        vkUpdateDescriptorSets(mContext.GetLogicalDevice().handle, 1, &write, 0, nullptr);
     }
 
 }

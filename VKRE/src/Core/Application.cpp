@@ -3,32 +3,37 @@
 
 #include <Renderer/Renderer.h>
 
+#include <cassert>
 #include <chrono>
 #include <imgui.h>
 
 namespace VKRE {
 
     Application::Application() {
-        if (mInstance) {
-            assert("Application has already been initialised!");
-        }
-
+        assert(!mInstance && "Application has already been initialised!");
         mInstance = this;
 
+        // TODO: Read these from a config file (editor builds want bigger pools than the runtime)
+        RHIRendererSettings rhiSettings{};
+        AssetManagerSettings assetSettings{};
+
         mWindow = std::make_unique<Window>(WindowSpecs{ .resizable = true });
-        mResourceManager = std::make_unique<ResourceManager>();
-        mAssetManager = std::make_unique<AssetManager>(*mResourceManager);
         mVulkanContext = std::make_unique<VulkanContext>(*mWindow);
-        mVulkanRenderer = std::make_unique<VulkanRenderer>(*mVulkanContext, *mResourceManager);
+        mVulkanRenderer = std::make_unique<VulkanRenderer>(*mVulkanContext, rhiSettings);
+        mRHIRenderer = std::make_unique<RHIRenderer>(mVulkanRenderer->GetResourceCache());
+        mAssetManager = std::make_unique<AssetManager>(assetSettings, *mRHIRenderer);
 
         Renderer::SetRenderer(mVulkanRenderer.get());
     }
 
     Application::~Application() {
+        mLayersStack.Clear();
+
+        mAssetManager.reset();
+        mRHIRenderer.reset();
+
         mVulkanRenderer.reset();
         mVulkanContext.reset();
-        mAssetManager.reset();
-        mResourceManager.reset();
         mWindow.reset();
     }
 
@@ -46,16 +51,20 @@ namespace VKRE {
             mWindow->OnUpdate();
             mVulkanRenderer->BeginFrame();
 
+            mAssetManager->FreePendingUnloads();
+
             {
                 VKRE_SCOPED_TIMER("Application::LayersStack::OnUpdate");
                 for (auto& layer : mLayersStack)
                     layer->OnUpdate(dt);
             }
+
             {
                 VKRE_SCOPED_TIMER("Application::LayersStack::OnUIRender");
                 for (auto& layer : mLayersStack)
                     layer->OnUIRender();
             }
+
             {
                 VKRE_SCOPED_TIMER("ImGui::Render");
                 mVulkanRenderer->OnImGui();
@@ -63,6 +72,11 @@ namespace VKRE {
             }
 
             mVulkanRenderer->Render();
+            if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+                ImGui::UpdatePlatformWindows();
+                ImGui::RenderPlatformWindowsDefault();
+            }
+
             Profiler::EndFrame();
         }
     }

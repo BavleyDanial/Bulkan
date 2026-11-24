@@ -2,11 +2,11 @@
 
 #include <vulkan/vulkan.h>
 
-#include <ResourceManager/ResourceRefs.h>
-#include <ResourceManager/ResourceHandles.h>
-
 #include <bit>
+#include <cstdint>
 #include <functional>
+#include <span>
+#include <vector>
 
 static inline bool operator==(const VkPushConstantRange& a, const VkPushConstantRange& b) {
     return a.stageFlags == b.stageFlags && a.size == b.size && a.offset == b.offset;
@@ -18,6 +18,33 @@ static inline void CombineHash(size_t& seed, size_t value) {
 
 namespace VKRE {
 
+    struct VulkanShaderStage {
+        std::span<const uint32_t> spirV;
+        const char* entryPoint = "main";
+
+        bool IsValid() const { return !spirV.empty(); }
+    };
+
+    inline uint64_t HashShaderStage(const VulkanShaderStage& stage) {
+        if (!stage.IsValid())
+            return 0;
+
+        uint64_t hash = 0xcbf29ce484222325ull;
+        auto mix = [&hash](uint8_t byte) {
+            hash ^= byte;
+            hash *= 0x100000001b3ull;
+        };
+
+        for (uint32_t word : stage.spirV) {
+            for (uint32_t shift = 0; shift < 32; shift += 8)
+                mix(static_cast<uint8_t>(word >> shift));
+        }
+        for (const char* c = stage.entryPoint; c && *c; c++)
+            mix(static_cast<uint8_t>(*c));
+
+        return hash;
+    }
+
     struct VulkanPipelineLayoutKey {
         std::vector<VkDescriptorSetLayout> descriptorSetLayouts; // TODO: Change this from vector to something better for hashing
         std::vector<VkPushConstantRange> pushConstantRanges; // TODO: Change this from vector to something better for hashing
@@ -28,13 +55,15 @@ namespace VKRE {
         static VulkanPipelineLayoutKey Null() { return {}; }
     };
 
+    struct VulkanGraphicsShaders {
+        VulkanShaderStage vertex;
+        VulkanShaderStage fragment;
+        // TODO: Add other shaders
+    };
+
     struct VulkanGraphicsPipelineKey {
-        // Shaders
-        ShaderHandle vertexShader = ShaderHandle::Null();
-        ShaderHandle fragmentShader = ShaderHandle::Null();
-        ShaderHandle geometryShader = ShaderHandle::Null();
-        ShaderHandle tessControlShader = ShaderHandle::Null();
-        ShaderHandle tessEvalShader = ShaderHandle::Null();
+        uint64_t vertexShader = 0;
+        uint64_t fragmentShader = 0;
 
         VkPipelineLayout layout = VK_NULL_HANDLE;
 
@@ -88,12 +117,6 @@ namespace VKRE {
         VkPipeline pipeline = VK_NULL_HANDLE;
         VkPipelineLayout layout = VK_NULL_HANDLE;
 
-        ResourceRef<ShaderTag> vertexShader = ResourceRef<ShaderTag>();
-        ResourceRef<ShaderTag> fragmentShader = ResourceRef<ShaderTag>();
-        ResourceRef<ShaderTag> geometryShader = ResourceRef<ShaderTag>();
-        ResourceRef<ShaderTag> tessControlShader = ResourceRef<ShaderTag>();
-        ResourceRef<ShaderTag> tessEvalShader = ResourceRef<ShaderTag>();
-
         bool Succeeded() const { return pipeline != VK_NULL_HANDLE; }
 
         void Destroy(VkDevice device) {
@@ -106,7 +129,7 @@ namespace VKRE {
     };
 
     struct VulkanComputePipelineKey {
-        ShaderHandle shader = ShaderHandle::Null();
+        uint64_t shader = 0; // HashShaderStage
         VkPipelineLayout layout = VK_NULL_HANDLE;
 
         bool operator==(const VulkanComputePipelineKey&) const = default;
@@ -118,8 +141,6 @@ namespace VKRE {
     struct VulkanComputePipeline {
         VkPipeline pipeline = VK_NULL_HANDLE;
         VkPipelineLayout layout = VK_NULL_HANDLE;
-
-        ResourceRef<ShaderTag> shader = ResourceRef<ShaderTag>();
 
         bool Succeeded() const { return pipeline != VK_NULL_HANDLE; }
 
@@ -158,12 +179,9 @@ namespace std {
     struct hash<VKRE::VulkanGraphicsPipelineKey> {
         size_t operator()(const VKRE::VulkanGraphicsPipelineKey& key) const noexcept {
             size_t result = 0;
-            CombineHash(result, std::hash<VKRE::ShaderHandle>{}(key.vertexShader));
-            CombineHash(result, std::hash<VKRE::ShaderHandle>{}(key.fragmentShader));
-            CombineHash(result, std::hash<VKRE::ShaderHandle>{}(key.geometryShader));
-            CombineHash(result, std::hash<VKRE::ShaderHandle>{}(key.tessEvalShader));
-            CombineHash(result, std::hash<VKRE::ShaderHandle>{}(key.tessControlShader));
-            CombineHash(result, std::hash<uint64_t>{}(reinterpret_cast<uint64_t>(key.layout)));
+            CombineHash(result, std::hash<uint64_t>{}(key.vertexShader));
+            CombineHash(result, std::hash<uint64_t>{}(key.fragmentShader));
+            CombineHash(result, std::hash<uint64_t>{}(std::bit_cast<uint64_t>(key.layout)));
 
             CombineHash(result, std::hash<uint32_t>{}(key.topology));
             CombineHash(result, std::hash<uint32_t>{}(key.primitveRestartEnable));
@@ -206,7 +224,7 @@ namespace std {
     struct hash<VKRE::VulkanComputePipelineKey> {
         size_t operator()(const VKRE::VulkanComputePipelineKey& key) const noexcept {
             size_t result = 0;
-            CombineHash(result, std::hash<VKRE::ShaderHandle>{}(key.shader));
+            CombineHash(result, std::hash<uint64_t>{}(key.shader));
             CombineHash(result, std::hash<uint64_t>{}(std::bit_cast<uint64_t>(key.layout)));
             return result;
         }

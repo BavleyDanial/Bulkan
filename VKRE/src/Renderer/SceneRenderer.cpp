@@ -18,13 +18,12 @@
 namespace VKRE {
 
     SceneRenderer::SceneRenderer() {
-        const ShaderAsset* basicShader = AssetManager::LoadShader("res/shaders/basic.glsl");
-        const ShaderAsset* skyboxLDRShader = AssetManager::LoadShader("res/shaders/skybox.glsl");
-        const ShaderAsset* skyboxHDRShader = AssetManager::LoadShader("res/shaders/skybox_hdr.glsl");
+        ResourceHandle<ShaderAsset> basicShader = AssetManager::LoadShader("res/shaders/basic.glsl");
+        ResourceHandle<ShaderAsset> skyboxLDRShader = AssetManager::LoadShader("res/shaders/skybox.glsl");
+        ResourceHandle<ShaderAsset> skyboxHDRShader = AssetManager::LoadShader("res/shaders/skybox_hdr.glsl");
 
         mDrawPass = Renderer::AddDrawPass({
-            .VertexShader = basicShader->VertexShader.Get(),
-            .FragmentShader = basicShader->FragmentShader.Get(),
+            .Shader = AssetManager::Get(basicShader),
             .debugName = "Scene Draw Pass",
             .pushConstantRanges = { { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(DrawPushConstants)} },
             .colorAttachmentFormats = { VK_FORMAT_R16G16B16A16_SFLOAT },
@@ -36,8 +35,7 @@ namespace VKRE {
         });
 
         mSkyboxLDRPass = Renderer::AddDrawPass({
-            .VertexShader = skyboxLDRShader->VertexShader.Get(),
-            .FragmentShader = skyboxLDRShader->FragmentShader.Get(),
+            .Shader = AssetManager::Get(skyboxLDRShader),
             .debugName = "Skybox LDR Pass",
             .pushConstantRanges = { { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(DrawPushConstants)} },
             .colorAttachmentFormats = { VK_FORMAT_R16G16B16A16_SFLOAT },
@@ -51,8 +49,7 @@ namespace VKRE {
         });
 
         mSkyboxHDRPass = Renderer::AddDrawPass({
-            .VertexShader = skyboxHDRShader->VertexShader.Get(),
-            .FragmentShader = skyboxHDRShader->FragmentShader.Get(),
+            .Shader = AssetManager::Get(skyboxHDRShader),
             .debugName = "Skybox HDR Pass",
             .pushConstantRanges = { { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(DrawPushConstants)} },
             .colorAttachmentFormats = { VK_FORMAT_R16G16B16A16_SFLOAT },
@@ -64,6 +61,11 @@ namespace VKRE {
             .colorLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
             .depthLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
         });
+
+        // TODO: Keep them (and rebuild the passes) once shaders hot reload.
+        AssetManager::Release(basicShader);
+        AssetManager::Release(skyboxLDRShader);
+        AssetManager::Release(skyboxHDRShader);
     }
 
     void SceneRenderer::Render() {
@@ -109,31 +111,29 @@ namespace VKRE {
     void SceneRenderer::RenderScene() {
         VKRE_SCOPED_TIMER("SceneRenderer::RenderScene");
         mScene->GetFlecsWorld().each([&](const TransformComponent& transform, const StaticMeshComponent& staticMesh) {
-            if (!staticMesh.Asset)
+            const MeshAsset* mesh = AssetManager::Get(staticMesh.Mesh);
+            if (!mesh || mesh->VertexBufferAddress == 0)
                 return;
-
-            uint64_t vbAddress = Renderer::GetBufferDeviceAddress(staticMesh.Asset->VertexBuffer.Get());
-            if (vbAddress == 0) return;
 
             glm::mat4 worldMatrix = glm::translate(glm::mat4(1.0f), transform.Position)
             * glm::mat4_cast(glm::quat(glm::radians(transform.Rotation)))
             * glm::scale(glm::mat4(1.0f), transform.Scale);
 
-            for (const auto& node : staticMesh.Asset->Nodes) {
+            for (const auto& node : mesh->Nodes) {
                 for (uint32_t i = 0; i < node.SubMeshCount; i++) {
-                    uint32_t idx = staticMesh.Asset->NodeSubMeshIndices[i + node.SubMeshOffset];
-                    const SubMesh& mesh = staticMesh.Asset->SubMeshes[idx];
+                    uint32_t idx = mesh->NodeSubMeshIndices[i + node.SubMeshOffset];
+                    const SubMesh& subMesh = mesh->SubMeshes[idx];
 
                     MeshDrawCommand cmd{};
-                    cmd.VertexBufferAddress = vbAddress;
-                    cmd.IndexBuffer = staticMesh.Asset->IndexBuffer.Get();
-                    cmd.IndexCount = mesh.IndexCount;
-                    cmd.BaseIndex = mesh.BaseIndex;
-                    cmd.BaseVertex = mesh.BaseVertex;
+                    cmd.VertexBufferAddress = mesh->VertexBufferAddress;
+                    cmd.IndexBuffer = mesh->IndexBuffer;
+                    cmd.IndexCount = subMesh.IndexCount;
+                    cmd.BaseIndex = subMesh.BaseIndex;
+                    cmd.BaseVertex = subMesh.BaseVertex;
                     cmd.Transform = worldMatrix * node.LocalTransform;
 
-                    if (mesh.TextureIndex >= 0 && mesh.TextureIndex < static_cast<int32_t>(staticMesh.Asset->Textures.size()))
-                        cmd.TextureIndex = staticMesh.Asset->TexturesIndices[mesh.TextureIndex];
+                    if (subMesh.TextureIndex >= 0 && subMesh.TextureIndex < static_cast<int32_t>(mesh->Textures.size()))
+                        cmd.TextureIndex = AssetManager::GetTextureIndex(mesh->Textures[subMesh.TextureIndex]);
 
                     Renderer::SubmitMeshDraw(mDrawPass, cmd);
                     mDrawCalls++;
@@ -144,19 +144,20 @@ namespace VKRE {
 
     void SceneRenderer::RenderSkybox() {
         VKRE_SCOPED_TIMER("SceneRenderer::RenderSkybox");
-        if (!mSkybox || mSkybox->BindlessIndex == -1)
+        const TextureCubeAsset* skybox = AssetManager::Get(mSkybox);
+        if (!skybox)
             return;
 
         glm::mat4 rotation = glm::mat4(glm::mat3(mCachedViewMat));
         SkyboxPushConstants pushConstants;
         pushConstants.ViewProjection = mCachedProjMat * rotation;
-        pushConstants.TextureCubeIndex = mSkybox->BindlessIndex;
+        pushConstants.TextureCubeIndex = AssetManager::GetTextureIndex(mSkybox);
 
         SkyboxDrawCommand cmd;
         cmd.PushConstants = pushConstants;
 
         // TODO: instead of branching every time we render a skybox, make it so that we remove the drawpass if the new skybox set is different from the current one and add the new drawpass
-        if (mSkybox->Format == TextureFormat::R16G16B16A16_SFLOAT || mSkybox->Format == TextureFormat::R32G32B32A32_SFLOAT)
+        if (skybox->Format == TextureFormat::R16G16B16A16_SFLOAT || skybox->Format == TextureFormat::R32G32B32A32_SFLOAT)
             Renderer::SubmitSkyboxDraw(mSkyboxHDRPass, cmd);
         else
             Renderer::SubmitSkyboxDraw(mSkyboxLDRPass, cmd);

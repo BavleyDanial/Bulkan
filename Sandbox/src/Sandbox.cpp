@@ -8,17 +8,19 @@ void SandboxLayer::OnAttach() {
     mSceneRenderer.SetScene(mScene.get());
     mSceneRenderer.SetCamera(mCamera);
 
-    const MeshAsset* sponzaMesh = AssetManager::LoadMesh("assets/models/main_sponza/NewSponza_Main_glTF_003.gltf");
+    mSponzaMesh = AssetManager::LoadMesh("assets/models/main_sponza/NewSponza_Main_glTF_003.gltf");
     uint32_t indices = 0;
-    for (const auto& submesh : sponzaMesh->SubMeshes)
-        indices += submesh.IndexCount;
+    if (const MeshAsset* sponzaMesh = AssetManager::Get(mSponzaMesh)) {
+        for (const auto& submesh : sponzaMesh->SubMeshes)
+            indices += submesh.IndexCount;
+    }
 
     uint32_t i = 0;
     for (uint32_t x = 0; x < 5; x++) {
         for (uint32_t z = 0; z < 5; z++) {
             std::string name = "Sponza " + std::to_string(i);
             Entity sponza = mScene->AddEntity(name.c_str());
-            sponza.Add<StaticMeshComponent>({ sponzaMesh });
+            sponza.Add<StaticMeshComponent>({ mSponzaMesh }); // 25 entities share one reference
             sponza.Add<TransformComponent>({ .Position = glm::vec3(50.0f * x, 0.0f, 50.0f * z) });
             i++;
         }
@@ -29,11 +31,14 @@ void SandboxLayer::OnAttach() {
 
     mSun = mScene->AddEntity("Sun");
     mSun.Add<DirectionalLightComponent>({});
-    const TextureCubeAsset* skyboxTexture = AssetManager::LoadTextureCube("assets/textures/StandardCubeMap.hdr");
-    mSceneRenderer.SetSkybox(skyboxTexture);
+    mSkybox = AssetManager::LoadTextureCube("assets/textures/StandardCubeMap.hdr");
+    mSceneRenderer.SetSkybox(mSkybox);
 }
 
-void SandboxLayer::OnDetach() {}
+void SandboxLayer::OnDetach() {
+    AssetManager::Release(mSponzaMesh);
+    AssetManager::Release(mSkybox);
+}
 
 void SandboxLayer::OnUpdate(float dt) {
     mFPS = 1 / dt;

@@ -13,10 +13,12 @@ namespace VKRE {
         LayersStack() = default;
         ~LayersStack();
 
+        void Clear();
+
         void PushLayer(std::unique_ptr<Layer> layer);
         void PushOverlay(std::unique_ptr<Layer> overlay);
-        void PopLayer(std::unique_ptr<Layer> layer);
-        void PopOverlay(std::unique_ptr<Layer> overlay);
+        std::unique_ptr<Layer> PopLayer(Layer* layer);
+        std::unique_ptr<Layer> PopOverlay(Layer* overlay);
 
         std::vector<std::unique_ptr<Layer>>::iterator begin() { return mLayers.begin(); }
         std::vector<std::unique_ptr<Layer>>::iterator end() { return mLayers.end(); }

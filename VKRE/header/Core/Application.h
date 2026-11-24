@@ -9,7 +9,7 @@
 #include <Core/LayerStack.h>
 
 #include <AssetsManagers/AssetManager.h>
-#include <ResourceManager/ResourceManager.h>
+#include <Renderer/RHIRenderer.h>
 
 #include <Vulkan/VulkanContext.h>
 #include <Vulkan/VulkanRenderer.h>
@@ -30,8 +30,8 @@ namespace VKRE {
 
         void PushLayer(std::unique_ptr<Layer> layer) { mLayersStack.PushLayer(std::move(layer)); }
         void PushOverlay(std::unique_ptr<Layer> overlay) { mLayersStack.PushOverlay(std::move(overlay)); }
-        void PopLayer(std::unique_ptr<Layer> layer) { mLayersStack.PopLayer(std::move(layer)); }
-        void PopOverlay(std::unique_ptr<Layer> overlay) { mLayersStack.PopOverlay(std::move(overlay)); }
+        void PopLayer(std::unique_ptr<Layer> layer) { mLayersStack.PopLayer(layer.get()); }
+        void PopOverlay(std::unique_ptr<Layer> overlay) { mLayersStack.PopOverlay(overlay.get()); }
 
         Window& GetWindow() { return *mWindow; }
         EventDispatcher& GetEventDispatcher() { return mEventDispatcher; }
@@ -40,12 +40,11 @@ namespace VKRE {
         static inline Application* mInstance = nullptr;
 
         // Core
-        std::unique_ptr<Window> mWindow; // TODO: Make multiple windows possible (through an array with window ids? but then we need to make sure that each context is tied to the correct id? idk... For now this is fine especially when we add ImGui's multiviewport)
         EventDispatcher mEventDispatcher;
         LayersStack mLayersStack;
 
-        // Resource & Asset Management
-        std::unique_ptr<ResourceManager> mResourceManager;
+        std::unique_ptr<Window> mWindow; // TODO: Make multiple windows possible (through an array with window ids? but then we need to make sure that each context is tied to the correct id? idk... For now this is fine especially when we add ImGui's multiviewport)
+        std::unique_ptr<RHIRenderer> mRHIRenderer;
         std::unique_ptr<AssetManager> mAssetManager;
 
         // Vulkan

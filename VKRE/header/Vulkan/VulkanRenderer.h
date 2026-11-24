@@ -12,11 +12,11 @@
 
 #include <Vulkan/VulkanResourceCache.h>
 #include <Vulkan/VulkanDescriptors.h>
-#include <Vulkan/VulkanUploader.h>
 #include <Vulkan/VulkanImage.h>
 
-#include <ResourceManager/ResourceManager.h>
+#include <Renderer/RHIRenderer.h>
 #include <ResourceManager/Resources.h>
+#include <Assets/Shader.h>
 #include <Core/Events/Events.h>
 
 #include <array>
@@ -35,7 +35,7 @@ namespace VKRE {
     static constexpr DrawPassHandle INVALID_DRAW_PASS = std::numeric_limits<uint32_t>::max();
 
     struct ComputePassDesc {
-        ShaderHandle ComputeShader;
+        const ShaderAsset* Shader = nullptr;
         std::string debugName;
         std::vector<VkPushConstantRange> pushConstantRanges;
         uint32_t workgroupX = 16;
@@ -44,8 +44,7 @@ namespace VKRE {
     };
 
     struct DrawPassDesc {
-        ShaderHandle VertexShader = ShaderHandle::Null();
-        ShaderHandle FragmentShader = ShaderHandle::Null();
+        const ShaderAsset* Shader = nullptr;
         std::string debugName;
         std::vector<VkPushConstantRange> pushConstantRanges;
 
@@ -64,7 +63,7 @@ namespace VKRE {
 
     class VulkanRenderer {
     public:
-        VulkanRenderer(VulkanContext& context, ResourceManager& resourceManager);
+        VulkanRenderer(VulkanContext& context, const RHIRendererSettings& settings);
         ~VulkanRenderer();
 
         void ReSize(const WindowResizeEvent& event);
@@ -74,11 +73,7 @@ namespace VKRE {
         void Render();
         void OnImGui();
 
-        void UploadMesh(GPUBufferHandle vertexBuffer, GPUBufferHandle indexBuffer, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
-        int32_t UploadTexture2D(Texture2DHandle handle, const std::vector<std::byte>& pixels);
-        int32_t UploadTextureCube(TextureCubeHandle handle, const std::array<std::vector<std::byte>, 6>& pixels);
         void UploadSceneData(const SceneUBO& sceneData);
-        uint64_t GetBufferDeviceAddress(GPUBufferHandle buffer);
 
         DrawPassHandle AddDrawPass(const DrawPassDesc& desc);
         void SubmitMeshDraw(DrawPassHandle handle, const MeshDrawCommand& cmd);
@@ -94,8 +89,9 @@ namespace VKRE {
 
         void ClearImage(VkCommandBuffer cmd);
 
+        VulkanResourceCache& GetResourceCache() { return *mResourceCache; }
+
     private:
-        void CreateDefaultSampler();
         void CreateDrawImage();
         void ReCreateDrawImage();
 
@@ -106,13 +102,10 @@ namespace VKRE {
 
     private:
         VulkanContext& mContext;
-        ResourceManager& mResourceManager;
-
-        std::unique_ptr<VulkanResourceCache> mResourceCache;
-        std::unique_ptr<VulkanUploader> mUploader;
 
         std::unique_ptr<VulkanFrameManager> mFrameManager;
         std::unique_ptr<VulkanPresenter> mPresenter;
+        std::unique_ptr<VulkanResourceCache> mResourceCache;
 
         std::unique_ptr<VulkanImageData> mDrawImage; // TODO: Once done with managing deletion/creation internally turn into a value rather than a pointer
         std::unique_ptr<VulkanImageData> mDepthImage;
@@ -126,19 +119,8 @@ namespace VKRE {
         VkDescriptorSet mDrawImageSet;
         VkDescriptorSetLayout mDrawImageLayout;
 
-        /* Texture Descriptors & Samplers */
-        VulkanFixedBindlessDescriptorAllocator mBindlessTexture2DAllocator;
-        VulkanFixedBindlessDescriptorAllocator mBindlessTextureCubeAllocator;
-        VkSampler mDefaultSampler;
-
-        VkDescriptorSet mBindlessTexture2DSet;
-        VkDescriptorSetLayout mBindlessTexture2DLayout;
-
-        VkDescriptorSet mBindlessTextureCubeSet;
-        VkDescriptorSetLayout mBindlessTextureCubeLayout;
-
         /* Scene Descriptors */
-        VkDescriptorSet mCurrentSceneSet;
+        VkDescriptorSet mCurrentSceneSet = VK_NULL_HANDLE;
         VkDescriptorSetLayout mSceneLayout;
 
         std::vector<VulkanGPUBufferData> mSceneUniformBuffers;
