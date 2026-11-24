@@ -72,7 +72,7 @@ namespace VKRE {
         :mContext(context), mFramesInFlight(framesInFlight) {
         mBuffers.Slots.Init(settings.MaxBuffers);
         mImages2D.Slots.Init(settings.MaxTextures2D);
-        mImagesCube.Slots.Init(settings.MaxTextureCubes);
+        mImagesCube.Slots.Init(settings.MaxTexturesCube);
 
         mUploader = std::make_unique<VulkanUploader>(mContext, *this);
 
@@ -526,12 +526,12 @@ namespace VKRE {
 
         {   // TextureCube Descriptor Set 3
             VulkanDescriptorLayoutBuilder layoutBuilder;
-            layoutBuilder.AddBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, settings.MaxTextureCubes);
+            layoutBuilder.AddBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, settings.MaxTexturesCube);
             mBindlessTextureCubeLayout = layoutBuilder.Build(device, VK_SHADER_STAGE_FRAGMENT_BIT,
                     &bindingFlagsInfo,
                     VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT);
 
-            mBindlessTextureCubeAllocator.InitPool(device, settings.MaxTextureCubes);
+            mBindlessTextureCubeAllocator.InitPool(device, settings.MaxTexturesCube);
             mBindlessTextureCubeSet = mBindlessTextureCubeAllocator.Allocate(device, mBindlessTextureCubeLayout);
         }
     }
