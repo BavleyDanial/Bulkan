@@ -17,7 +17,7 @@ namespace VKRE {
         Assimp::Importer importer;
         const aiScene* scene = importer.ReadFile(pathStr,
             aiProcess_Triangulate           |
-            aiProcess_FlipUVs               |
+            aiProcess_ConvertToLeftHanded   |
             aiProcess_JoinIdenticalVertices |
             aiProcess_CalcTangentSpace      |
             aiProcess_GenSmoothNormals      |

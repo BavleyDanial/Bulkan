@@ -14,6 +14,7 @@
 #include <imgui.h>
 
 #include <print>
+#include <vulkan/vulkan_core.h>
 
 namespace VKRE {
 
@@ -31,7 +32,7 @@ namespace VKRE {
             .depthTestEnable = true,
             .depthWriteEnable = true,
             .depthCompareOp = VK_COMPARE_OP_LESS,
-            .cullMode = VK_CULL_MODE_NONE,
+            .cullMode = VK_CULL_MODE_BACK_BIT,
         });
 
         mSkyboxLDRPass = Renderer::AddDrawPass({
@@ -89,7 +90,8 @@ namespace VKRE {
             glm::vec2 viewport = Renderer::GetViewportDimensions();
 
             sceneData.View = glm::lookAtLH(position, position + forward, glm::vec3(0, 1, 0));
-            sceneData.Projection = glm::perspectiveLH_NO(glm::radians(camComponent.FOV), viewport.x / viewport.y, camComponent.Near, camComponent.Far);
+            sceneData.Projection = glm::perspectiveLH_ZO(glm::radians(camComponent.FOV), viewport.x / viewport.y, camComponent.Near, camComponent.Far);
+            sceneData.CameraPosition = glm::vec4(position, 1.0f);
         }
 
         mScene->GetFlecsWorld().each([&](const DirectionalLightComponent& light) {

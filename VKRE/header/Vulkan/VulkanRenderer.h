@@ -107,8 +107,8 @@ namespace VKRE {
         std::unique_ptr<VulkanPresenter> mPresenter;
         std::unique_ptr<VulkanRHI> mResourceCache;
 
-        std::unique_ptr<VulkanImageData> mDrawImage; // TODO: Once done with managing deletion/creation internally turn into a value rather than a pointer
-        std::unique_ptr<VulkanImageData> mDepthImage;
+        VulkanImageData mDrawImage;
+        VulkanImageData mDepthImage;
 
         std::vector<VulkanDrawPass> mDrawPasses;
         std::vector<VulkanComputePass> mComputePasses;

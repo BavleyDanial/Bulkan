@@ -40,8 +40,8 @@ namespace VKRE {
         mPresenter.reset();
         mFrameManager.reset();
 
-        ImageUtils::ReleaseImage(mContext, mDrawImage.get());
-        ImageUtils::ReleaseImage(mContext, mDepthImage.get());
+        ImageUtils::ReleaseImage(mContext, &mDrawImage);
+        ImageUtils::ReleaseImage(mContext, &mDepthImage);
         for (auto& buffer : mSceneUniformBuffers)
             GPUBufferUtils::ReleaseBuffer(mContext, &buffer);
 
@@ -188,11 +188,8 @@ namespace VKRE {
         drawImageAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
         drawImageAllocInfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-        mDrawImage = std::make_unique<VulkanImageData>();
-        *mDrawImage = ImageUtils::ReCreateImage(mContext, mDrawImage.get(), format, drawImageUsages, drawImageExtent, VK_IMAGE_ASPECT_COLOR_BIT, 1, drawImageAllocInfo);
-
-        mDepthImage = std::make_unique<VulkanImageData>();
-        *mDepthImage = ImageUtils::ReCreateImage(mContext, mDepthImage.get(), VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, drawImageExtent, VK_IMAGE_ASPECT_DEPTH_BIT, 1, drawImageAllocInfo);
+        mDrawImage = ImageUtils::ReCreateImage(mContext, &mDrawImage, format, drawImageUsages, drawImageExtent, VK_IMAGE_ASPECT_COLOR_BIT, 1, drawImageAllocInfo);
+        mDepthImage = ImageUtils::ReCreateImage(mContext, &mDepthImage, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, drawImageExtent, VK_IMAGE_ASPECT_DEPTH_BIT, 1, drawImageAllocInfo);
     }
 
     void VulkanRenderer::ReCreateDrawImage() {
@@ -238,7 +235,7 @@ namespace VKRE {
         mDrawImageSet = mGlobalAllocator.Allocate(mContext.GetLogicalDevice().handle, mDrawImageLayout);
 
         VulkanDescriptorWriter writer;
-        writer.WriteImage(0, mDrawImage->imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+        writer.WriteImage(0, mDrawImage.imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
 
         writer.UpdateSet(mContext.GetLogicalDevice().handle, mDrawImageSet);
     }
@@ -299,11 +296,11 @@ namespace VKRE {
         VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBufferBeginInfo));
 
         VkExtent2D drawImageExtent = {
-            mDrawImage->extent.width,
-            mDrawImage->extent.height
+            mDrawImage.extent.width,
+            mDrawImage.extent.height
         };
 
-        ImageUtils::TransitionImage(cmd, mDrawImage->image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+        ImageUtils::TransitionImage(cmd, mDrawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
         // TODO: Replace this with passes
         ClearImage(cmd);
 
@@ -312,13 +309,13 @@ namespace VKRE {
                 pass.Execute(cmd, drawImageExtent);
         }
 
-        ImageUtils::TransitionImage(cmd, mDrawImage->image,VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        ImageUtils::TransitionImage(cmd, mDrawImage.image,VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
         VkClearValue clearValue{};
         clearValue.color = {0.0f, 0.0f, 0.0f, 1.0f};
         VkClearValue clearDepthValue{};
         clearDepthValue.depthStencil = {1.0, 0};
 
-        ImageUtils::TransitionImage(cmd, mDepthImage->image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+        ImageUtils::TransitionImage(cmd, mDepthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
         VkDescriptorSet bindlessTexture2DSet = mResourceCache->GetBindlessTexture2DSet();
         VkDescriptorSet bindlessTextureCubeSet = mResourceCache->GetBindlessTextureCubeSet();
@@ -328,7 +325,7 @@ namespace VKRE {
                 continue;
 
             VkRenderingAttachmentInfo colorAttachment = VulkanUtils::AttatchmentInfo(
-                mDrawImage->imageView,
+                mDrawImage.imageView,
                 pass.GetColorLoadOp() == VK_ATTACHMENT_LOAD_OP_CLEAR ? &clearValue : nullptr,
                 VK_ATTACHMENT_STORE_OP_STORE,
                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
@@ -337,7 +334,7 @@ namespace VKRE {
             // TODO: Change this to use the same function as above
             VkRenderingAttachmentInfo depthAttachment{};
             depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-            depthAttachment.imageView = mDepthImage->imageView;
+            depthAttachment.imageView = mDepthImage.imageView;
             depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
             depthAttachment.loadOp = pass.GetDepthLoadOp();
             depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -351,11 +348,11 @@ namespace VKRE {
                         mCurrentSceneSet, bindlessTexture2DSet, bindlessTextureCubeSet);
         }
 
-        ImageUtils::TransitionImage(cmd, mDrawImage->image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        ImageUtils::TransitionImage(cmd, mDrawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
         VkImage swapChainImage = mPresenter->GetImages()[swapchainImageIndex];
         ImageUtils::TransitionImage(cmd, swapChainImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        ImageUtils::CopyImage(cmd, mDrawImage->image, swapChainImage, drawImageExtent, mPresenter->GetSwapChain().extent);
+        ImageUtils::CopyImage(cmd, mDrawImage.image, swapChainImage, drawImageExtent, mPresenter->GetSwapChain().extent);
         ImageUtils::TransitionImage(cmd, swapChainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
         mImGuiPass->Execute(cmd, { swapchainImageIndex, nullptr} );
@@ -414,8 +411,8 @@ namespace VKRE {
 
     glm::vec2 VulkanRenderer::GetViewportDimensions() const {
         return {
-            mDrawImage->extent.width,
-            mDrawImage->extent.height
+            mDrawImage.extent.width,
+            mDrawImage.extent.height
         };
     }
 
@@ -423,7 +420,7 @@ namespace VKRE {
         VkClearColorValue clearValue;
         clearValue = { { 0.0f, 0.0f, 0.0f, 1.0f } };
         VkImageSubresourceRange clearRange = ImageUtils::ImageSubSourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
-        vkCmdClearColorImage(cmd, mDrawImage->image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+        vkCmdClearColorImage(cmd, mDrawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
     }
 
 }
