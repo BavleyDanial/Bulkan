@@ -35,15 +35,7 @@ namespace VKRE {
         );
 
     private:
-        struct ParsedStage {
-            ShaderStage stage;
-            std::string source;
-        };
-
-    private:
         static std::optional<std::string> ReadFile(const std::filesystem::path& path);
-        static std::vector<ParsedStage> ParseStages(const std::string& source);
-        static ShaderStage ParseStageToken(std::string_view token);
     };
 
 }

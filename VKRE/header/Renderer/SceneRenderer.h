@@ -27,6 +27,7 @@ namespace VKRE {
     private:
         void RenderScene();
         void RenderSkybox();
+        void ApplyPostProcessing();
 
     private:
         Entity mCamera;
@@ -37,8 +38,11 @@ namespace VKRE {
         glm::mat4 mCachedProjMat = glm::mat4(1.0f);
 
         DrawPassHandle mDrawPass = INVALID_DRAW_PASS;
-        DrawPassHandle mSkyboxLDRPass = INVALID_DRAW_PASS;
-        DrawPassHandle mSkyboxHDRPass = INVALID_DRAW_PASS;
+        DrawPassHandle mSkyboxPass = INVALID_DRAW_PASS;
+        ComputePassHandle mPostProcessPass = INVALID_COMPUTE_PASS;
+
+        PostProcessConstants mPostProcessConstants;
+
         uint32_t mDrawCalls = 0;
     };
 

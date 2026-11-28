@@ -2,6 +2,7 @@
 #include <Core/Profiler.h>
 
 #include <Renderer/Renderer.h>
+#include <ResourceManager/ShaderCompiler.h>
 
 #include <cassert>
 #include <chrono>
@@ -27,6 +28,7 @@ namespace VKRE {
         mRHIRenderer = std::make_unique<RHIRenderer>(mVulkanRenderer->GetResourceCache());
         mAssetManager = std::make_unique<AssetManager>(assetSettings, *mRHIRenderer);
 
+        ShaderCompiler::Init();
         Renderer::SetRenderer(mVulkanRenderer.get());
     }
 
@@ -39,6 +41,8 @@ namespace VKRE {
         mVulkanRenderer.reset();
         mVulkanContext.reset();
         mWindow.reset();
+
+        ShaderCompiler::Shutdown();
     }
 
     void Application::Run() {

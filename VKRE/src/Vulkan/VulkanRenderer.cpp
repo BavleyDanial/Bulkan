@@ -162,7 +162,7 @@ namespace VKRE {
             return INVALID_COMPUTE_PASS;
         }
 
-        mComputePasses.emplace_back(*mResourceCache, pipelineKey, mDrawImageSet, glm::vec3(desc.workgroupX, desc.workgroupY, desc.workgroupZ));
+        mComputePasses.emplace_back(*mResourceCache, pipelineKey, mDrawImageSet, glm::vec3(desc.workgroupX, desc.workgroupY, desc.workgroupZ), desc.Step);
         return static_cast<ComputePassHandle>(mComputePasses.size() - 1);
     }
 
@@ -305,7 +305,7 @@ namespace VKRE {
         ClearImage(cmd);
 
         for (auto& pass : mComputePasses) {
-            if (pass.IsActive())
+            if (pass.IsActive() && pass.GetActiveStep() == ComputePassStep::PreDraw)
                 pass.Execute(cmd, drawImageExtent);
         }
 
@@ -348,7 +348,12 @@ namespace VKRE {
                         mCurrentSceneSet, bindlessTexture2DSet, bindlessTextureCubeSet);
         }
 
-        ImageUtils::TransitionImage(cmd, mDrawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+        ImageUtils::TransitionImage(cmd, mDrawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+        for (auto& pass : mComputePasses) {
+            if (pass.IsActive() && pass.GetActiveStep() == ComputePassStep::PostProcess)
+                pass.Execute(cmd, drawImageExtent);
+        }
+        ImageUtils::TransitionImage(cmd, mDrawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
         VkImage swapChainImage = mPresenter->GetImages()[swapchainImageIndex];
         ImageUtils::TransitionImage(cmd, swapChainImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);

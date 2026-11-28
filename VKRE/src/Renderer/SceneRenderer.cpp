@@ -19,26 +19,26 @@
 namespace VKRE {
 
     SceneRenderer::SceneRenderer() {
-        ResourceHandle<ShaderAsset> basicShader = AssetManager::LoadShader("res/shaders/basic.glsl");
-        ResourceHandle<ShaderAsset> skyboxLDRShader = AssetManager::LoadShader("res/shaders/skybox.glsl");
-        ResourceHandle<ShaderAsset> skyboxHDRShader = AssetManager::LoadShader("res/shaders/skybox_hdr.glsl");
+        ResourceHandle<ShaderAsset> basicShader = AssetManager::LoadShader("res/shaders/basic.slang");
+        ResourceHandle<ShaderAsset> skyboxShader = AssetManager::LoadShader("res/shaders/skybox.slang");
+        ResourceHandle<ShaderAsset> postProcessShader = AssetManager::LoadShader("res/shaders/postprocess.slang");
 
         mDrawPass = Renderer::AddDrawPass({
             .Shader = AssetManager::Get(basicShader),
             .debugName = "Scene Draw Pass",
-            .pushConstantRanges = { { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(DrawPushConstants)} },
+            .pushConstantRanges = { { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(DrawPushConstants) }},
             .colorAttachmentFormats = { VK_FORMAT_R16G16B16A16_SFLOAT },
             .depthAttachmentFormat = VK_FORMAT_D32_SFLOAT,
             .depthTestEnable = true,
             .depthWriteEnable = true,
             .depthCompareOp = VK_COMPARE_OP_LESS,
-            .cullMode = VK_CULL_MODE_BACK_BIT,
+            .cullMode = VK_CULL_MODE_NONE,
         });
 
-        mSkyboxLDRPass = Renderer::AddDrawPass({
-            .Shader = AssetManager::Get(skyboxLDRShader),
-            .debugName = "Skybox LDR Pass",
-            .pushConstantRanges = { { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(DrawPushConstants)} },
+        mSkyboxPass = Renderer::AddDrawPass({
+            .Shader = AssetManager::Get(skyboxShader),
+            .debugName = "Skybox Draw Pass",
+            .pushConstantRanges = { { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(DrawPushConstants) }},
             .colorAttachmentFormats = { VK_FORMAT_R16G16B16A16_SFLOAT },
             .depthAttachmentFormat = VK_FORMAT_D32_SFLOAT,
             .depthTestEnable = true,
@@ -49,24 +49,17 @@ namespace VKRE {
             .depthLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
         });
 
-        mSkyboxHDRPass = Renderer::AddDrawPass({
-            .Shader = AssetManager::Get(skyboxHDRShader),
-            .debugName = "Skybox HDR Pass",
-            .pushConstantRanges = { { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(DrawPushConstants)} },
-            .colorAttachmentFormats = { VK_FORMAT_R16G16B16A16_SFLOAT },
-            .depthAttachmentFormat = VK_FORMAT_D32_SFLOAT,
-            .depthTestEnable = true,
-            .depthWriteEnable = false,
-            .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
-            .cullMode = VK_CULL_MODE_NONE,
-            .colorLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-            .depthLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+        mPostProcessPass = Renderer::AddComputePass({
+            .Shader = AssetManager::Get(postProcessShader),
+            .debugName = "PostProcess Pass",
+            .pushConstantRanges = { { VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PostProcessConstants) }},
+            .Step = ComputePassStep::PostProcess,
         });
 
         // TODO: Keep them (and rebuild the passes) once shaders hot reload.
         AssetManager::Release(basicShader);
-        AssetManager::Release(skyboxLDRShader);
-        AssetManager::Release(skyboxHDRShader);
+        AssetManager::Release(skyboxShader);
+        AssetManager::Release(postProcessShader);
     }
 
     void SceneRenderer::Render() {
@@ -107,6 +100,7 @@ namespace VKRE {
         mDrawCalls = 0;
         RenderScene();
         RenderSkybox();
+        ApplyPostProcessing();
     }
 
 
@@ -158,11 +152,11 @@ namespace VKRE {
         SkyboxDrawCommand cmd;
         cmd.PushConstants = pushConstants;
 
-        // TODO: instead of branching every time we render a skybox, make it so that we remove the drawpass if the new skybox set is different from the current one and add the new drawpass
-        if (skybox->Format == TextureFormat::R16G16B16A16_SFLOAT || skybox->Format == TextureFormat::R32G32B32A32_SFLOAT)
-            Renderer::SubmitSkyboxDraw(mSkyboxHDRPass, cmd);
-        else
-            Renderer::SubmitSkyboxDraw(mSkyboxLDRPass, cmd);
+        Renderer::SubmitSkyboxDraw(mSkyboxPass, cmd);
     }
 
+    void SceneRenderer::ApplyPostProcessing() {
+        VKRE_SCOPED_TIMER("SceneRenderer::ApplyPostProcessing");
+        Renderer::SetComputePassData(mPostProcessPass, &mPostProcessConstants, sizeof(PostProcessConstants));
+    }
 }

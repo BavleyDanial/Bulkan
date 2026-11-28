@@ -37,10 +37,10 @@ set(FLECS_STATIC ON CACHE INTERNAL "Enable Flecs Static")
 find_package(Vulkan REQUIRED)
 
 if (WIN32)
-    find_library(SHADERC_LIB shaderc_shared HINTS $ENV{VULKAN_SDK}/Lib)
+    find_library(SLANG_LIB slang HINTS $ENV{VULKAN_SDK}/Lib)
     set(VULKAN_INCLUDE_PATH $ENV{VULKAN_SDK}/Include)
 else()
-    find_library(SHADERC_LIB shaderc_shared HINTS $ENV{VULKAN_SDK}/lib)
+    find_library(SLANG_LIB slang HINTS $ENV{VULKAN_SDK}/lib)
     set(VULKAN_INCLUDE_PATH $ENV{VULKAN_SDK}/include)
 endif()
 

@@ -2,8 +2,8 @@
 
 namespace VKRE {
 
-    VulkanComputePass::VulkanComputePass(VulkanRHI& cache, const VulkanComputePipelineKey& key, VkDescriptorSet descriptorSet, const glm::vec3& workgroup)
-        :mPipeline(cache.GetComputePipeline(key)), mDescriptorSet(descriptorSet), mWorkGroup(workgroup) {}
+    VulkanComputePass::VulkanComputePass(VulkanRHI& cache, const VulkanComputePipelineKey& key, VkDescriptorSet descriptorSet, const glm::vec3& workgroup, ComputePassStep step)
+        :mPipeline(cache.GetComputePipeline(key)), mDescriptorSet(descriptorSet), mWorkGroup(workgroup), mStep(step) {}
 
     void VulkanComputePass::Execute(VkCommandBuffer cmd, VkExtent2D extent) {
         Execute(cmd, { extent.width, extent.height, 1 });

@@ -138,12 +138,12 @@ virtual void OnUIRender() {
 - [x] Add Textures
 - [x] Add Cubemaps/Skyboxes
 - [x] Rename Repo and namespaces to Bulkan or something related to that
+- [x] Use Slang instead of GLSL
 - [ ] Add Materials - In Progress
 - [ ] Add Blinn-Phong Specular Model - In Progress
 - [ ] Add PBR lighting - Soon
-- [ ] Use Slang instead of GLSL
 - [ ] Add Render Graph
-  - [ ] Add Deffered Rendering
+- [ ] Add Deffered Rendering
 - [ ] Add a proper Editor
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>

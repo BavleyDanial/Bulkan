@@ -38,9 +38,10 @@ namespace VKRE {
         const ShaderAsset* Shader = nullptr;
         std::string debugName;
         std::vector<VkPushConstantRange> pushConstantRanges;
-        uint32_t workgroupX = 16;
-        uint32_t workgroupY = 16;
+        uint32_t workgroupX = 8;
+        uint32_t workgroupY = 8;
         uint32_t workgroupZ = 1;
+        ComputePassStep Step = ComputePassStep::PreDraw;
     };
 
     struct DrawPassDesc {

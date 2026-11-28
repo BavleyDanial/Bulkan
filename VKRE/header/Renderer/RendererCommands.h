@@ -19,6 +19,10 @@ namespace VKRE {
         uint32_t TextureCubeIndex = 0;
     };
 
+    struct PostProcessConstants {
+        float Exposure = 1.0f;
+    };
+
     struct MeshDrawCommand {
         GPUBufferHandle IndexBuffer;
         uint32_t IndexCount;

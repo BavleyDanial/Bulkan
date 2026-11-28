@@ -19,7 +19,7 @@ target_include_directories("VKRE" PUBLIC
 
 target_link_libraries("VKRE" PUBLIC
     assimp
-    ${SHADERC_LIB}
+    ${SLANG_LIB}
 )
 
 target_link_libraries("VKRE" PUBLIC

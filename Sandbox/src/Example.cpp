@@ -10,7 +10,7 @@ void ExampleLayer::OnAttach() {
     mTeapotMesh = AssetManager::LoadMesh("res/models/teapot.obj");
     mTeapot = mScene->AddEntity("Teapot");
     mTeapot.Add<StaticMeshComponent>({ mTeapotMesh });
-    mTeapot.Add<TransformComponent>({ .Position = glm::vec3(0.0f, 0.0f, 50.0f), .Rotation = glm::vec3(-90.0f, 0.0f, 0.0f) });
+    mTeapot.Add<TransformComponent>({ .Position = glm::vec3(0.0f, 0.0f, 50.0f), .Rotation = glm::vec3(90.0f, 0.0f, 0.0f) });
 
     mSun = mScene->AddEntity("Sun");
     mSun.Add<DirectionalLightComponent>({});

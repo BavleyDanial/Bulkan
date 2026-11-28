@@ -3,8 +3,9 @@
 #include "Resources.h"
 
 #include <filesystem>
-#include <string>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace VKRE {
 
@@ -12,24 +13,31 @@ namespace VKRE {
         bool Optimise = false;
         bool GenerateDebugInfo = true;
 
-        std::string EntryPoint = "main";
         std::vector<std::string> Defines;
         std::vector<std::filesystem::path> IncludePaths;
     };
 
-    struct ShaderCompileResult {
+    struct ShaderCompiledStage {
+        ShaderStage Stage = ShaderStage::None;
         std::vector<uint32_t> ByteCode;
+        std::string EntryPoint;
+    };
+
+    struct ShaderCompileResult {
+        std::vector<ShaderCompiledStage> Stages;
         std::string ErrorMsg;
 
-        bool Succeeded() const { return !ByteCode.empty(); }
-        bool Failed() const { return ByteCode.empty(); }
+        bool Succeeded() const { return !Stages.empty(); }
+        bool Failed() const { return Stages.empty(); }
     };
 
     class ShaderCompiler {
     public:
+        static void Init();
+        static void Shutdown();
+
         static ShaderCompileResult Compile(const std::string& source,
-            ShaderStage stage,
-            const std::string& debugName,
+            const std::filesystem::path& path,
             const ShaderCompileOptions& options = {}
         );
     };
